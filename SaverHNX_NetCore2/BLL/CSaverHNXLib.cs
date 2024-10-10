@@ -42,7 +42,7 @@ namespace SaverHNX_NetCore2.BLL
 
             //Nếu time < 9h cho xóa key
             DateTime currentTime = DateTime.Now;
-            if (currentTime.Hour < 20)
+            if (currentTime.Hour < 09)
             {
                 //xóa key LE/LS
                 this.ClearLE2LSKeys();
