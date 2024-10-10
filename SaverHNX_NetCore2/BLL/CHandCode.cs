@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using SaverHNX_NetCore2.DAL;
 using SaverHNX_NetCore2.Extensions;
 using SaverHNX_NetCore2.Models;
 using SaverHNX_NetCore2.Settings;
@@ -59,18 +60,25 @@ namespace SaverHNX_NetCore2.BLL
         private Dictionary<string, string> m_dicLE_NM_TotalTradedQtty = new Dictionary<string, string>();
         private Dictionary<string, string> m_dicLS_NM_TotalTradedQtty = new Dictionary<string, string>();
         //const REDIS
-        private const string REGEX_TYPE_BOARD_INFO = "(MsgType='BI')";
+        private const string REGEX_TYPE_BOARD_INFO = @"\bMsgType='BI'\b";
         private const string REGEX_CSV_CHECK_IS_SI_TP = "(MsgType='TP|SI')";
         private const string REGEX_TYPE_DERIVATIVES_INFO_A_LOGIN = "(MsgType='A')";
         private const string REGEX_LOGONINFO = @"\bLogon_Infor\b='([^']*)'";
-        private const string REGEX_SQL_GET_SYMBOL = @"\bSymbol='([^']*)'";
-        private const string REGEX_SQL_GET_PROP_VAL_4_LE = @"(?<Data>\bTime\b|\bMatchPrice\b|\bNM_TotalTradedValue\b|\bNM_TotalTradedQtty\b)='(?<Val>.*?)'";
-        private const string REGEX_SQL_GET_PROP_VAL_2_LS = @"(?<DataLS>\bTime\b|\bMatchPrice\b|\bMatchQtty\b|\bNM_TotalTradedQtty\b)='(?<Val>.*?)'";
+        private const string REGEX_RD_GET_SYMBOL = @"\bSymbol='([^']*)'";
+
+        private const string REGEX_RD_GET_PROP_VAL_4_LE = @"(?<Data>\bTime\b|\bMatchPrice\b|\bNM_TotalTradedValue\b|\bNM_TotalTradedQtty\b)='(?<Val>.*?)'";
+        private const string REGEX_RD_GET_PROP_VAL_2_LS = @"(?<DataLS>\bTime\b|\bMatchPrice\b|\bMatchQtty\b|\bNM_TotalTradedQtty\b)='(?<Val>.*?)'";
+
         private const string REGEX_CHECK_DI_VAL = "(MsgType='DI')";
+        //PO
+        private const string REGEX_RD_CHECK_IS_PO = @"\bMsgType='PO'\b";
+        private const string REGEX_SQL_GET_PROP_VAL_4_PO = @"\bMsgType='(?<MsgType>PO)'.*?\bSendingTime='(?<SendingTime>[^']*)',\bSymbol='(?<Symbol>[^']*)'.*?\bBidPrice_1='(?<BidPrice_1>[^']*)',\bBidQtty_1='(?<BidQtty_1>[^']*)',\bBidPrice_2='(?<BidPrice_2>[^']*)',\bBidQtty_2='(?<BidQtty_2>[^']*)',\bBidPrice_3='(?<BidPrice_3>[^']*)',\bBidQtty_3='(?<BidQtty_3>[^']*)',\bOfferPrice_1='(?<OfferPrice_1>[^']*)',\bOfferQtty_1='(?<OfferQtty_1>[^']*)',\bOfferPrice_2='(?<OfferPrice_2>[^']*)',\bOfferQtty_2='(?<OfferQtty_2>[^']*)',\bOfferPrice_3='(?<OfferPrice_3>[^']*)',\bOfferQtty_3='(?<OfferQtty_3>[^']*)'";
+        const string TEMPLATE_JSONC_PO = "{\"T\":\"(T)\",\"S\":\"(S)\",\"BP1\":(BP1),\"BQ1\":(BQ1),\"BP2\":(BP2),\"BQ2\":(BQ2),\"BP3\":(BP3),\"BQ3\":(BQ3),\"SP1\":(SP1),\"SQ1\":(SQ1),\"SP2\":(SP2),\"SQ2\":(SQ2),\"SP3\":(SP3),\"SQ3\":(SQ3)}";    //
+        private const string TEMPLATE_REDIS_KEY_PO = "PO:S5G_(Symbol)"; //   PO:S5G_(Symbol)
         //realtime => REDIS
         private const string TEMPLATE_REDIS_KEY_REALTIME = "REALTIME:S5G_(Symbol)"; //   REALTIME:S5G_(Symbol)
         private const string REDIS_KEY_HNX_BI = "S5G_HNX_BI";
-        private const string REGEX_CSV_GET_TYPE = "MsgType='(?<Type>.*?)'";
+        private const string REGEX_CSV_GET_TYPE = "@MsgType='(?<Type>.*?)'";
         private const string REGEX_CSV_GET_SENDING_TIME = "SendingTime='(?<SendingTime>.*?)'";
         private const string REGEX_CSV_GET_SYMBOL = @"\bSymbol\b='(?<Symbol>.*?)'";//"Symbol='(?<Symbol>.*?)'";
         private const string REGEX_CSV_GET_PROP_VAL = @"(\w+)='([^']*)'";//"@(?<SQLParam>.*?)='(?<Val>.*?)'";
@@ -82,10 +90,21 @@ namespace SaverHNX_NetCore2.BLL
         private const string TEMPLATE_JSONC = "{\"STime\":\"(STime)\",\"SI\":{(SI)},\"TP\":{(TP)}}"; // {"SI":{}, "TP":{"ST":"20151119-09:00:21","NTP":"2","BBP1":"19900","BBQ1":"3000","BBP2":"18500","BBQ2":"1000"}}
         private const string TYPE_SI = "SI";
         private const string TYPE_TP = "TP";
-        public CRedis m_RC;
+        //const SQL
+        // ten SP se tao theo quy tac
+        //prc_S5G_HNX_SAVER_IG_SI_UPDATE
+        //prc_S5G_HNX_SAVER_IG_TP_UPDATE
+        public const string TEMPLATE_SP_S5G_HNX_SAVER = "prc_S5G_HNX_SAVER_IG_(Type)_UPDATE"; //prc_S5G_HNX_SAVER_IG_SI_UPDATE
+
+        private CRedis m_RC;
         private AppSetting _appsetting;
-        public CHandCode(AppSetting _appsetting)
+        private CDatabase _cDatabase;
+        public CHandCode(AppSetting _appsetting, CRedis _cRedis, CDatabase cdatabase)
         {
+            this.m_RC = _cRedis;
+            this._appsetting = _appsetting;
+            this._cDatabase = cdatabase;
+
             this.m_dicI = this.InitDic(MSG_TYPE_INDEX);                  // MSG_TYPE_MESSAGE_INDEX = "I";
             this.m_dicS = this.InitDic(MSG_TYPE_BASKET_INDEX);           // MSG_TYPE_BASKET_INDEX = "S";
             this.m_dicSI = this.InitDic(MSG_TYPE_STOCK_INFO);             // MSG_TYPE_STOCK_INFO = "SI";
@@ -98,9 +117,9 @@ namespace SaverHNX_NetCore2.BLL
             this.m_dicDI = this.InitDic(MSG_TYPE_DERIVATIVES_INFO);       // MSG_TYPE_DERIVATIVES_INFO = "DI";
             this.m_dicDIO = this.InitDic(MSG_TYPE_DERIVATIVES_INFO_ORACLE);       // MSG_TYPE_DERIVATIVES_INFO_ORACLE = "DIO";
             this.m_dicLogon = this.InitDic(MSG_TYPE_DERIVATIVES_INFO_A_LOGIN);       // MSG_TYPE_DERIVATIVES_INFO_ORACLE = "A";
-            this._appsetting = _appsetting;
-
-            this.m_RC = new CRedis(_appsetting.RedisSetting);
+            
+            
+            
         }
         public enum REPLACE_TAGS                                                // xac dinh muc dich replace tag, khi pub can tiet kiem bandwith, de ten fieldName ngan nhat co the
         {
@@ -121,21 +140,20 @@ namespace SaverHNX_NetCore2.BLL
                         Redis_msg_A(strCSV, ref strLogonInfor);
                         break;
                     case "SI":
-
-                        Task task1 = Task.Run(() => InsertRealtime2Redis(strCSV));
-                        Task task2 = Task.Run(() => InsertLE2Redis(strCSV));
-                        Task task3 = Task.Run(() => InsertLS2Redis(strCSV));    
-                        Task.WaitAll(task1, task2, task3);
                         //Hàm xử lý REDIS key REALTIME:S5G_A32
                         //InsertRealtime2Redis(strCSV);
                         //Hàm xử lý REDIS key LE
                         //InsertLE2Redis(strCSV);
+                        Task task1 = Task.Run(() => InsertRealtime2Redis(strCSV));
+                        Task task2 = Task.Run(() => InsertLE2Redis(strCSV));
+                        Task task3 = Task.Run(() => InsertLS2Redis(strCSV));    
+                        Task.WaitAll(task1, task2, task3);
                         break;
                     case "TP":
                         //Nếu có msg TP => Xử lý lại msgCSV 
-                        string strTP = this.CSV2TopNPrice(strCSV);
+                        //string strTP = this.CSV2TopNPrice(strCSV);
                         //Hàm xử lý REDIS key REALTIME:S5G_A32
-                        InsertRealtime2Redis(strTP);
+                        InsertRealtime2Redis(strCSV);
                         break;
                     case "DI":
                         Task taskDI = Task.Run(() => InsertLE2Redis(strCSV));
@@ -145,218 +163,51 @@ namespace SaverHNX_NetCore2.BLL
                     case "BI":
                         //Hàm xử lý REDIS key S5G_HNX_BI
                         InsertBI2Redis(strCSV);
-                        break; 
+                        break;
+                    case "PO":
+                        InsertPO2Redis(strCSV);
+                        break;
                     default:
                         break;
                 }
+            }
+            catch (Exception ex)
+            {
+                CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
+            }
+        }
+        /// <summary>
+        /// strCSV = "BeginString='HNX.TDS.1',BodyLength='528',MsgType='TP',SenderCompID='HNX',SendingTime='20241007-09:59:59',Symbol='VN30F2410',BoardCode='DER_BRD_01',NoTopPrice='10',NumTopPrice='1',BestBidPrice='1344.50',BestBidQtty='26',BestOfferPrice='1344.60',BestOfferQtty='121',NumTopPrice='2',BestBidPrice='1344.40',BestBidQtty='16',BestOfferPrice='1344.80',BestOfferQtty='283',NumTopPrice='3',BestBidPrice='1344.30',BestBidQtty='61',BestOfferPrice='1344.90',BestOfferQtty='26',NumTopPrice='4',BestBidPrice='1344.20',BestBidQtty='61',BestOfferPrice='1345',BestOfferQtty='297',NumTopPrice='5',BestBidPrice='1344.10',BestBidQtty='180',BestOfferPrice='1345.20',BestOfferQtty='57',NumTopPrice='6',BestBidPrice='1344',BestBidQtty='178',BestOfferPrice='1345.30',BestOfferQtty='68',NumTopPrice='7',BestBidPrice='1343.90',BestBidQtty='8',BestOfferPrice='1345.40',BestOfferQtty='38',NumTopPrice='8',BestBidPrice='1343.80',BestBidQtty='82',BestOfferPrice='1345.50',BestOfferQtty='59',NumTopPrice='9',BestBidPrice='1343.70',BestBidQtty='16',BestOff..."
+        /// strSQL = "prc_S5G_HNX_SAVER_IG_TP_UPDATE @BeginString='HNX.TDS.1',@BodyLength='528',@MsgType='TP',@SenderCompID='HNX',@SendingTime='20241007-09:59:59',@Symbol='VN30F2410',@BoardCode='DER_BRD_01',@NoTopPrice='10',@NumTopPrice='1',@BestBidPrice='1344.50',@BestBidQtty='26',@BestOfferPrice='1344.60',@BestOfferQtty='121',@NumTopPrice='2',@BestBidPrice='1344.40',@BestBidQtty='16',@BestOfferPrice='1344.80',@BestOfferQtty='283',@NumTopPrice='3',@BestBidPrice='1344.30',@BestBidQtty='61',@BestOfferPrice='1344.90',@BestOfferQtty='26',@NumTopPrice='4',@BestBidPrice='1344.20',@BestBidQtty='61',@BestOfferPrice='1345',@BestOfferQtty='297',@NumTopPrice='5',@BestBidPrice='1344.10',@BestBidQtty='180',@BestOfferPrice='1345.20',@BestOfferQtty='57',@NumTopPrice='6',@BestBidPrice='1344',@BestBidQtty='178',@BestOfferPrice='1345.30',@BestOfferQtty='68',@NumTopPrice='7',@BestBidPrice='1343.90',@BestBidQtty='8',@BestOfferPrice='1345.40',@BestOfferQtty='38',@NumTopPrice='8',@BestBidPrice='1343.80',@BestBidQtty='82',@BestOfferPrice='1345.50',@Bes..."
+        /// </summary>
+        /// <param name="strCSV"></param>
+        public void ProcessDataSQL(string strCSV)
+        {
+            try
+            {
+                //string strSPname = "";
+                //string strSQL = "";
+                //StringBuilder sb = new StringBuilder(strCSV, strCSV.Length * 2);
+                ////Thêm dấu phẩy vào đầu
+                ////sb.Insert(0, ",");
+                ////Thêm @ vào trước key
+                //sb.Replace(",", ",@");
+                //// Xóa dấu phẩy ở đầu
+                ////sb.Remove(0,1);
 
-                // MsgType = A => Insert Key LogonHNX
-                //if (Regex.IsMatch(strCSV, REGEX_TYPE_DERIVATIVES_INFO_A_LOGIN))
-                //{
-                //    Match match = Regex.Match(strCSV, REGEX_LOGONINFO);
-                //    if (match.Success) 
-                //    {
-                //        strLogonInfor = match.Groups[1].Value;
-                //        //CLog.LogEx("Msg_A.txt", strLogonInfor);
-                //    }
-                //}
-                //// MsgType = BI => Insert Key HNX_BI
-                //if (Regex.IsMatch(strCSV, REGEX_TYPE_BOARD_INFO))
-                //{
-                //    //CLog.LogEx("Msg_BI.txt", strCSV);
-                //    string strBoardCode = Regex.Match(strCSV, @"BoardCode='([^']*)'").Groups[1].Value;
-                //    string strKey = REDIS_KEY_HNX_BI;
-                //    List<IG_BI_FULL> _listBI = new List<IG_BI_FULL>();
-                //    IG_BI_FULL ig_bi_full = new IG_BI_FULL();
-                //    // Regex để tìm các cặp key-value theo định dạng key='value'
-                //    string pattern = REGEX_CSV_GET_PROP_VAL;
-                //    var matches = Regex.Matches(strCSV, pattern);
-                //    foreach (Match match in matches)
-                //    {
-                //        var key = match.Groups[1].Value;
-                //        var value = match.Groups[2].Value;
-                //        if (!string.IsNullOrEmpty(value) && !string.IsNullOrEmpty(key))
-                //        {
-                //            switch (key)
-                //            {
-                //                case "BeginString":
-                //                    ig_bi_full.BeginString = value;
-                //                    break;
-                //                case "BodyLength":
-                //                    ig_bi_full.BodyLength = value;
-                //                    break;
-                //                case "MsgType":
-                //                    ig_bi_full.MsgType = value;
-                //                    break;
-                //                case "SenderCompID":
-                //                    ig_bi_full.SenderCompID = value;
-                //                    break;
-                //                case "SendingTime":
-                //                    ig_bi_full.SendingTime = value;
-                //                    break;
-                //                case "Name":
-                //                    ig_bi_full.Name = value;
-                //                    break;
-                //                case "Shortname":
-                //                    ig_bi_full.Shortname = value;
-                //                    break;
-                //                case "numSymbolAdvances":
-                //                    ig_bi_full.numSymbolAdvances = value;
-                //                    break;
-                //                case "numSymbolDeclines":
-                //                    ig_bi_full.numSymbolDeclines = value;
-                //                    break;
-                //                case "8numSymbolNochange":
-                //                    ig_bi_full.numSymbolNochange = value;
-                //                    break;
-                //                case "totalNormalTradedQttyOd":
-                //                    ig_bi_full.totalNormalTradedQttyOd = value;
-                //                    break;
-                //                case "totalNormalTradedValueOd":
-                //                    ig_bi_full.totalNormalTradedValueOd = value;
-                //                    break;
-                //                case "totalNormalTradedQttyRd":
-                //                    ig_bi_full.totalNormalTradedQttyRd = value;
-                //                    break;
-                //                case "totalNormalTradedValueRd":
-                //                    ig_bi_full.totalNormalTradedValueRd = value;
-                //                    break;
-                //                case "totalPTTradedQtty":
-                //                    ig_bi_full.totalPTTradedQtty = value;
-                //                    break;
-                //                case "totalPTTradedValue":
-                //                    ig_bi_full.totalPTTradedValue = value;
-                //                    break;
-                //                case "TotalTrade":
-                //                    ig_bi_full.TotalTrade = value;
-                //                    break;
-                //                case "TotalStock":
-                //                    ig_bi_full.TotalStock = value;
-                //                    break;
-                //                case "DateNo":
-                //                    ig_bi_full.DateNo = value;
-                //                    break;
-                //                case "BoardCode":
-                //                    ig_bi_full.BoardCode = value;
-                //                    break;
-                //                case "BoardStatus":
-                //                    ig_bi_full.BoardStatus = value;
-                //                    break;
-                //                case "Tradingdate":
-                //                    ig_bi_full.Tradingdate = value;
-                //                    break;
-                //                case "Time":
-                //                    ig_bi_full.Time = value;
-                //                    break;
-                //                case "TradingSessionID":
-                //                    ig_bi_full.TradingSessionID = value;
-                //                    break;
-                //                case "TradSesStatus":
-                //                    ig_bi_full.TradSesStatus = value;
-                //                    break;
-                //                case "f341":
-                //                    ig_bi_full.f341 = value;
-                //                    break;
-                //                default:
-                //                    // Các trường khác chưa xử lý
-                //                    break;
-                //            }
-                //        }
-                        
-                //    }
-                    
-                //    Dic_AddOrUpdate(ref m_dicBI2, strBoardCode, ig_bi_full);
+                ////Lấy ra type của strCSV => Đặt vào template 
+                //string strCSVType = Regex.Match(strCSV, REGEX_CSV_GET_TYPE).Groups[1].Value;
 
-                //    foreach(KeyValuePair<string,IG_BI_FULL> pair in m_dicBI2)
-                //    {
-                //        IG_BI_FULL ig_full = pair.Value;
-                //        _listBI.Add(ig_full);
-                //    }
-                //    EDataSingle eDataSingle = new EDataSingle(_listBI);
+                //strSPname = TEMPLATE_SP_S5G_HNX_SAVER.Replace("(Type)", strCSVType);
 
-                //    //Tạo JsonSerializerSettings để bỏ qua giá trị null
-                //    var jsonSettings = new JsonSerializerSettings
-                //    {
-                //        NullValueHandling = NullValueHandling.Ignore,
-                //    };
-                //    string jsonData = JsonConvert.SerializeObject(eDataSingle, jsonSettings);   
+                //sb.Insert(0, strSPname + " @");
 
-                //    //insert BI => Redis
-                //    this.m_RC.SetCacheBI(strKey, jsonData, CConfig.intPeriod);
+                //strSQL = sb.ToString();
 
-                //}
-                ////Msg = SI/TP => Insert Key Realtime
-                //if(Regex.IsMatch(strCSV, REGEX_CSV_CHECK_IS_SI_TP)){
-                //    //CLog.LogEx("Msg_SI_TP.txt", strCSV);
+                //if (strSQL == "") return;
+                _cDatabase.ExecuteScriptQuoteSaverHNX(strCSV);
 
-                //    StringBuilder sbJsonC = new StringBuilder(TEMPLATE_JSONC);
-                //    StringBuilder sbSI = new StringBuilder("");
-                //    StringBuilder sbTP = new StringBuilder("");
-                //    string strReplacedCSV = "";
-                //    string strJsonC = "";
-
-                //    // lay type tu strCSV (SI/TP)
-                //    string strType = Regex.Match(strCSV, REGEX_CSV_GET_TYPE).Groups[1].Value;
-
-                //    //Nếu có msg TP => Xử lý lại msgCSV 
-                //    if(strType == TYPE_TP)
-                //    {
-                //        strCSV = this.CSV2TopNPrice(strCSV);
-                //        //Ghi lại Log msgTP đã được xử lý
-                //        CLog.LogEx("test_msg_TP.txt", strCSV);
-                //    }
-
-                //    // lay symbol tu strSQL (SI/TP)
-                //    string strSymbol = Regex.Match(strCSV, REGEX_CSV_GET_SYMBOL).Groups[1].Value;
-                //    // lay SendingTime tu strSQL (SI/TP)
-                //    string strSendingTime = Regex.Match(strCSV, REGEX_CSV_GET_SENDING_TIME).Groups[1].Value;
-
-                //    // replace de xoa cac thong tin ko can thiet
-                //    strReplacedCSV = Regex.Replace(strCSV, REGEX_SQL_REPLACE_REMOVE_TRASH, "");
-
-                //    // lay ra tat ca Prop/Val strReplacedCSV
-                //    Regex RegexObj = new Regex(REGEX_CSV_GET_PROP_VAL2);
-                //    Match MatchResults = RegexObj.Match(strReplacedCSV);
-                //    while (MatchResults.Success) 
-                //    {
-                //        StringBuilder sbProp = new StringBuilder(MatchResults.Groups["CSVParam"].Value);
-                //        StringBuilder sbVal = new StringBuilder(MatchResults.Groups["Val"].Value);
-
-                //        //replace CSVParam dài -> sbProp ngắn
-                //        sbProp = this.SQLParam2ShortProp(sbProp);
-                //        sbVal = this.LongVal2ShortVal(sbVal);
-
-                //        // noi string json
-                //        if (strType == TYPE_SI) sbSI.Append(",\"").Append(sbProp).Append("\":\"").Append(sbVal).Append("\""); // ,"BBQ1":"3000"
-                //        if (strType == TYPE_TP) sbTP.Append(",\"").Append(sbProp).Append("\":\"").Append(sbVal).Append("\""); // ,"BBQ1":"3000"
-
-                //        MatchResults = MatchResults.NextMatch();
-                //    }
-                //    // xoa ky , tu dau tien
-                //    if (sbSI.Length > 0) sbSI.Remove(0, 1);
-                //    if (sbTP.Length > 0) sbTP.Remove(0, 1);
-                //    sbJsonC
-                //        .Replace("(STime)", DateTime.Now.ToString(CConfig.FORMAT_DATETIME_6)) //strSendingTime ko co phan nghin second nen phai dung server time cua FPTS
-                //        .Replace("(SI)", sbSI.ToString())
-                //        .Replace("(TP)", sbTP.ToString());
-
-                //    strJsonC = sbJsonC.ToString();
-
-                //    //Insert SI/TP -> key Realtime
-                //    string Z_KEY = TEMPLATE_REDIS_KEY_REALTIME
-                //    .Replace("(Date)", DateTime.Now.ToString(TEMPLATE_REDIS_KEY_REALTIME_DATE))
-                //    .Replace("(Symbol)", strSymbol);
-
-                //    double Z_SCORE = Convert.ToDouble(DateTime.Now.ToString(CConfig.FORMAT_TIME_5));
-                //    string Z_VALUE = strJsonC;
-
-                //    if(m_RC.RC != null)
-                //    {
-                //        m_RC.RC.SortedSetAdd(Z_KEY, Z_VALUE, Z_SCORE);
-                //    }
-                //}
-                //Msg = SI/DI => Insert Key LE
-                //if(Regex.IsMatch(strCSV,))
+                //send Monitor5G
             }
             catch (Exception ex)
             {
@@ -618,11 +469,11 @@ namespace SaverHNX_NetCore2.BLL
                 string strSymbol = "", strJsonC = "";
 
                 // lay symbol tu strResult (SI/DI)
-                strSymbol = Regex.Match(strLS, REGEX_SQL_GET_SYMBOL).Groups[1].Value;
+                strSymbol = Regex.Match(strLS, REGEX_RD_GET_SYMBOL).Groups[1].Value;
 
                 LS_Model ls = new LS_Model();
                 //lay ra tat ca Prop/Val trong strResult
-                Regex RegexObj = new Regex(REGEX_SQL_GET_PROP_VAL_2_LS);
+                Regex RegexObj = new Regex(REGEX_RD_GET_PROP_VAL_2_LS);
                 Match MatchResults = RegexObj.Match(strLS);
 
                 while (MatchResults.Success)
@@ -724,10 +575,10 @@ namespace SaverHNX_NetCore2.BLL
                 int intMatchCount = 0;
                 string strSymbol = "", strJsonC = "";
                 // lay symbol tu strResult (SI/DI)
-                strSymbol = Regex.Match(strLE, REGEX_SQL_GET_SYMBOL).Groups[1].Value;
+                strSymbol = Regex.Match(strLE, REGEX_RD_GET_SYMBOL).Groups[1].Value;
                 LE_Model le = new LE_Model();
                 //lay ra tat ca Prop/Val trong strResult
-                Regex RegexObj = new Regex(REGEX_SQL_GET_PROP_VAL_4_LE);
+                Regex RegexObj = new Regex(REGEX_RD_GET_PROP_VAL_4_LE);
                 Match MatchResults = RegexObj.Match(strLE);
                 while (MatchResults.Success)
                 {
@@ -809,6 +660,92 @@ namespace SaverHNX_NetCore2.BLL
                 return false ;
             }
         }
+        /// <summary>
+        /// Hàm xử lý msg PO => insert key PO
+        /// </summary>
+        /// <param name="strPO"></param>
+        /// <returns></returns>
+        private bool InsertPO2Redis(string strPO)
+        {
+            try
+            {
+                if(strPO == "") return false;
+                const string DEBUG_CODE = "VND";
+                //declare
+                StringBuilder sbJsonC = new StringBuilder(TEMPLATE_JSONC_PO);
+                string strJsonC = "";
+                string strSymbol = "";
+                int intMatchCount = 0;
+
+                if (strSymbol == DEBUG_CODE) CLog.LogEx("PO.txt", "strPO=" + strPO);
+
+                // lay symbol tu strSQL (SI/TP)
+                strSymbol = Regex.Match(strPO, REGEX_RD_GET_SYMBOL).Groups[1].Value;
+                // lay ra tat ca Prop/Val trong strPO
+                Regex RegexObj = new Regex(REGEX_SQL_GET_PROP_VAL_4_PO);
+                Match MatchResults = RegexObj.Match(strPO);
+                if (MatchResults.Success) 
+                {
+                    string T = MatchResults.Groups["SendingTime"].Value.ToString();
+                    string S = MatchResults.Groups["Symbol"].Value.ToString();
+                    string BP1 = MatchResults.Groups["BidPrice_1"].Value.ToString();
+                    string BQ1 = MatchResults.Groups["BidQtty_1"].Value.ToString();
+                    string BP2 = MatchResults.Groups["BidPrice_2"].Value.ToString();
+                    string BQ2 = MatchResults.Groups["BidQtty_2"].Value.ToString();
+                    string BP3 = MatchResults.Groups["BidPrice_3"].Value.ToString();
+                    string BQ3 = MatchResults.Groups["BidQtty_3"].Value.ToString();
+                    string SP1 = MatchResults.Groups["OfferPrice_1"].Value.ToString();
+                    string SQ1 = MatchResults.Groups["OfferQtty_1"].Value.ToString();
+                    string SP2 = MatchResults.Groups["OfferPrice_2"].Value.ToString();
+                    string SQ2 = MatchResults.Groups["OfferQtty_2"].Value.ToString();
+                    string SP3 = MatchResults.Groups["OfferPrice_3"].Value.ToString();
+                    string SQ3 = MatchResults.Groups["OfferQtty_3"].Value.ToString();
+
+                    if (CBase.IsNumeric(BP1)) BP1 = (Convert.ToDecimal(BP1) / 1000).ToString();
+                    if (CBase.IsNumeric(BP2)) BP2 = (Convert.ToDecimal(BP2) / 1000).ToString();
+                    if (CBase.IsNumeric(BP3)) BP3 = (Convert.ToDecimal(BP3) / 1000).ToString();
+                    if (CBase.IsNumeric(SP1)) SP1 = (Convert.ToDecimal(SP1) / 1000).ToString();
+                    if (CBase.IsNumeric(SP2)) SP2 = (Convert.ToDecimal(SP2) / 1000).ToString();
+                    if (CBase.IsNumeric(SP3)) SP3 = (Convert.ToDecimal(SP3) / 1000).ToString();
+
+                    sbJsonC
+                        .Replace("(T)", T)
+                        .Replace("(S)", S)
+                        .Replace("(BP1)", BP1)
+                        .Replace("(BQ1)", BQ1)
+                        .Replace("(BP2)", BP2)
+                        .Replace("(BQ2)", BQ2)
+                        .Replace("(BP3)", BP3)
+                        .Replace("(BQ3)", BQ3)
+                        .Replace("(SP1)", SP1)
+                        .Replace("(SQ1)", SQ1)
+                        .Replace("(SP2)", SP2)
+                        .Replace("(SQ2)", SQ2)
+                        .Replace("(SP3)", SP3)
+                        .Replace("(SQ3)", SQ3);
+                    intMatchCount++;// ko co intMatchCount thi ko the return string jsonC
+                }
+
+                if (strSymbol == DEBUG_CODE) CLog.LogEx("PO.txt", "sbJsonC=" + sbJsonC.ToString());
+                if (strSymbol == DEBUG_CODE) CLog.LogEx("PO.txt", "intMatchCount=" + intMatchCount.ToString());
+
+                strJsonC = sbJsonC.ToString();
+                // tao key/value
+                string strKey = TEMPLATE_REDIS_KEY_PO.Replace("(Symbol)", strSymbol);
+                //insert Redis
+                if(m_RC.RC != null)
+                {
+                    m_RC.SetCache(strKey, strJsonC, CConfig.intPeriod);
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
+                return false;
+            }
+        }
         ///<sumary>
         ///Convert msgCSV thành msg TopNPrice
         ///strCSV = 8='HNX.TDS.1',BodyLength='528',MsgType='TP',SenderCompID='HNX',SendingTime='20241007-09:59:59',Symbol='VN30F2410',BoardCode='DER_BRD_01',NoTopPrice='10',NumTopPrice='1',BestBidPrice='1344.50',BestBidQtty='26',BestOfferPrice='1344.60',BestOfferQtty='121',NumTopPrice='2',BestBidPrice='1344.40',BestBidQtty='16',BestOfferPrice='1344.80',BestOfferQtty='283',NumTopPrice='3',BestBidPrice='1344.30',BestBidQtty='61',BestOfferPrice='1344.90',BestOfferQtty='26',NumTopPrice='4',BestBidPrice='1344.20',BestBidQtty='61',BestOfferPrice='1345',BestOfferQtty='297',NumTopPrice='5',BestBidPrice='1344.10',BestBidQtty='180',BestOfferPrice='1345.20',BestOfferQtty='57',NumTopPrice='6',BestBidPrice='1344',BestBidQtty='178',BestOfferPrice='1345.30',BestOfferQtty='68',NumTopPrice='7',BestBidPrice='1343.90',BestBidQtty='8',BestOfferPrice='1345.40',BestOfferQtty='38',NumTopPrice='8',BestBidPrice='1343.80',BestBidQtty='82',BestOfferPrice='1345.50',BestOfferQtty='59',NumTopPrice='9',BestBidPrice='1343.70',BestBidQtty='16',BestOfferPrice='1345.60',BestOfferQtty='49',NumTopPrice='10',BestBidPrice='1343.60',BestBidQtty='97',BestOfferPrice='1345.70',BestOfferQtty='42'
@@ -821,24 +758,24 @@ namespace SaverHNX_NetCore2.BLL
                 //Cắt th NumTopPrice xuống =>  
                 //NumTopPrice='1',BestBidPrice='31200',BestBidQtty='4300',BestOfferPrice='31300',BestOfferQtty='36600',
                 //NumTopPrice = '2',BestBidPrice = '31100',BestBidQtty = '87900',BestOfferPrice = '31400',BestOfferQtty = '46000',
-                strTP = strCSV.Replace("NumTopPrice", "\r\n" + "NumTopPrice");
+                strTP = strCSV.Replace("@NumTopPrice", "\r\n" + "@NumTopPrice");
 
-                Regex RegexObj = new Regex("(?<FullRow>NumTopPrice.*)");
+                Regex RegexObj = new Regex("(?<FullRow>@NumTopPrice.*)");
                 Match MatchResults = default(Match);
                 Match MatchResults2 = default(Match);
                 string strFullRow = "";
                 string strFullRowNew = "";
-                string BESTBIDPRICE = "BestBidPrice";
-                string BESTBIDQTTY = "BestBidQtty";
-                string BESTOFFERPRICE = "BestOfferPrice";
-                string BESTOFFERQTTY = "BestOfferQtty";
+                string BESTBIDPRICE = "@BestBidPrice";
+                string BESTBIDQTTY = "@BestBidQtty";
+                string BESTOFFERPRICE = "@BestOfferPrice";
+                string BESTOFFERQTTY = "@BestOfferQtty";
 
                 MatchResults = RegexObj.Match(strTP);
 
                 while (MatchResults.Success) 
                 {
                     strFullRow = (MatchResults.Groups["FullRow"].Value);
-                    MatchResults2 = Regex.Match(strFullRow, "(?<FullNumTop>NumTopPrice='(?<NumTop>\\d*?)',)");
+                    MatchResults2 = Regex.Match(strFullRow, "(?<FullNumTop>@NumTopPrice='(?<NumTop>\\d*?)',)");
                     string strNumTop = MatchResults2.Groups["NumTop"].Value;
                     string strFullNumTop = MatchResults2.Groups["FullNumTop"].Value;
                     strFullRowNew = strFullRow.Replace(BESTBIDPRICE, BESTBIDPRICE + strNumTop);
@@ -855,9 +792,9 @@ namespace SaverHNX_NetCore2.BLL
                 //Bỏ xuống dòng
                 strTP = strTP.Replace("\r\n", "");
 
-                strTP = Regex.Replace(strTP, "NumTopPrice.*?,", ""); // xoa param NumTopPrice vi ko can thiet
+                strTP = Regex.Replace(strTP, "@NumTopPrice.*?,", ""); // xoa param NumTopPrice vi ko can thiet
 
-                strTP = RemoveHeader(strTP, "");
+                strTP = RemoveHeader(strTP, "@");
 
                 return strTP;
             }
@@ -867,24 +804,68 @@ namespace SaverHNX_NetCore2.BLL
                 return "";
             }
         }
-        public string Message2CSV(string strMessage)
+        /// <summary>
+        /// Xử lý msg FIX: 8=HNX.TDS.19=52835=TP49=HNX52=20241007-09:59:5955=VN30F2410425=DER_BRD_01555=10556=1132=1344.501321=26133=1344.601331=121556=2132=1344.401321=16133=1344.801331=283556=3132=1344.301321=61133=1344.901331=26556=4132=1344.201321=61133=13451331=297556=5132=1344.101321=180133=1345.201331=57556=6132=13441321=178133=1345.301331=68556=7132=1343.901321=8133=1345.401331=38556=8132=1343.801321=82133=1345.501331=59556=9132=1343.701321=16133=1345.601331=49556=10132=1343.601321=97133=1345.701331=42
+        /// => "BeginString='HNX.TDS.1',BodyLength='528',MsgType='TP',SenderCompID='HNX',SendingTime='20241007-09:59:59',Symbol='VN30F2410',BoardCode='DER_BRD_01',NoTopPrice='10',NumTopPrice='1',BestBidPrice='1344.50',BestBidQtty='26',BestOfferPrice='1344.60',BestOfferQtty='121',NumTopPrice='2',BestBidPrice='1344.40',BestBidQtty='16',BestOfferPrice='1344.80',BestOfferQtty='283',NumTopPrice='3',BestBidPrice='1344.30',BestBidQtty='61',BestOfferPrice='1344.90',BestOfferQtty='26',NumTopPrice='4',BestBidPrice='1344.20',BestBidQtty='61',BestOfferPrice='1345',BestOfferQtty='297',NumTopPrice='5',BestBidPrice='1344.10',BestBidQtty='180',BestOfferPrice='1345.20',BestOfferQtty='57',NumTopPrice='6',BestBidPrice='1344',BestBidQtty='178',BestOfferPrice='1345.30',BestOfferQtty='68',NumTopPrice='7',BestBidPrice='1343.90',BestBidQtty='8',BestOfferPrice='1345.40',BestOfferQtty='38',NumTopPrice='8',BestBidPrice='1343.80',BestBidQtty='82',BestOfferPrice='1345.50',BestOfferQtty='59',NumTopPrice='9',BestBidPrice='1343.70',BestBidQtty='16',BestOfferPrice='1345.60',BestOfferQtty='49',NumTopPrice='10',BestBidPrice='1343.60',BestBidQtty='97',BestOfferPrice='1345.70',BestOfferQtty='42'"
+        /// </summary>
+        /// <param name="strMessage"></param>
+        /// <returns></returns>
+        public string Message2CSV(string strMessage, ref string strORCL)
         {
             try
             {
                 string strType = "";
-                string strResult = "";
-                string[] arrPart = null;
+                string strResult = "";                
                 string strCSV = "";
+                string strSPname = "";
 
                 // replace so thanh chu
-                this.ReplaceTags(strMessage, ref strType, ref strResult,ref arrPart);
+                this.ReplaceTags(strMessage, ref strType, ref strResult, ref strORCL);
 
-                if (strResult == "")
+                if (strResult == "" )
                     return "";
+                // tim ra ten SP theo quy tac
+                strSPname = TEMPLATE_SP_S5G_HNX_SAVER.Replace("(Type)", strType);
 
-                strCSV = strResult.Replace(((char)1).ToString(), "',")
-                                      .Replace("=", "='")
-                                      .TrimEnd(',', ' ');
+                // obj SB de xu ly toc do nhanh
+                StringBuilder sb = new StringBuilder(strResult, strResult.Length * 2);
+                StringBuilder sbOracle = new StringBuilder(strORCL, strORCL.Length * 2);
+                // binMsg= 8=HNX.TDS.19=015135=BI49=HNX52=20150922-10:45:22421=LIS_BRD_ETF422=LIS_BRD_ETF17=179425=LIS_BRD_ETF426=A388=20150922399=10:45:22336=LIS_CON_NML340=1341=LIS
+                // => 8=HNX.TDS.1","9=0151","35=BI","49=HNX","52=20150922-10:45:22","421=LIS_BRD_ETF","422=LIS_BRD_ETF","17=179","425=LIS_BRD_ETF","426=A","388=20150922","399=10:45:22","336=LIS_CON_NML","340=1","341=LIS","
+                sb.Replace(((char)1).ToString(), "',@");
+                
+                if (strType == MSG_TYPE_DERIVATIVES_INFO)
+                {
+                    sbOracle.Replace(((char)1).ToString(), "|");
+                    strORCL = sbOracle.ToString();
+
+                }
+                // => 8":"HNX.TDS.1","9":"0151","35":"BI","49":"HNX","52":"20150922-10:45:22","421":"LIS_BRD_ETF","422":"LIS_BRD_ETF","17":"179","425":"LIS_BRD_ETF","426":"A","388":"20150922","399":"10:45:22","336":"LIS_CON_NML","340":"1","341":"LIS","
+                sb.Replace("=", "='");
+
+                // => ......,"341":"LIS","  => ,"341":"LIS"
+                sb.Length -= 3;
+
+                // => {"BeginString":"HNX.TDS.1","BodyLength":"0
+                sb.Insert(0, strSPname + " @");
+
+                // => .....,"TradingSessionID":"LIS_CON_NML","TradSesStatus":"1"}
+                sb.Append("'");
+
+                strCSV = sb.ToString();
+
+                //strCSV = strResult.Replace(((char)1).ToString(), "',")
+                //                      .Replace("=", "='")
+                //                      .TrimEnd(',', ' ');
+                //strSQL = strSQL.Replace(((char)1).ToString(), "',")
+                //                      .Replace("=", "='")
+                //                      .TrimEnd(',', '@', ' ');
+
+                //Nếu TopNPrice thì xử lý riêng
+                if (strType == MSG_TYPE_TOP_N_PRICE)
+                {
+                    return this.CSV2TopNPrice(strCSV);    
+                }
 
                 return strCSV;
             }
@@ -903,14 +884,16 @@ namespace SaverHNX_NetCore2.BLL
         /// </summary>
         /// <param name="strInput"></param>
         /// <returns></returns>
-        public bool ReplaceTags(string strMessage, ref string strType, ref string strResult, ref string[] arrPart)
+        public bool ReplaceTags(string strMessage, ref string strType, ref string strResult, ref string strORCL)
         {
             try
-            { 
-                //string[] arrPart;
+            {
+                string[] arrPart = null;
                 Dictionary<int, string> dic = null;                     // dic tuy thuoc vao tung type                
+                Dictionary<int, string> dicOracle = null;
                 arrPart = strMessage.Split((char)1);           // cac thong tin dc cach nhau bang ky tu co ma ascii=1 (ko nhin thay dc trong 1 so editor nhu NotePad, phai dung NotePad++ moi thay duoc)
                 StringBuilder sb = new StringBuilder(strMessage, strMessage.Length * 2); // khai bao string builder va phan chia mem
+                StringBuilder sbOracle = new StringBuilder(strMessage, strMessage.Length * 2);
                 string strSeparator = ((char)1).ToString();
                 // xac dinh type
                 strType = arrPart[2].Substring(3);       // "35=BI"=> "BI"
@@ -972,17 +955,59 @@ namespace SaverHNX_NetCore2.BLL
                 {
                     sb.Replace(strSeparator + k.ToString() + "=", strSeparator + dic[k] + "=");
                 }
+                if (dicOracle != null)
+                {
+                    sbOracle.Length -= 1;
+                    sbOracle.Insert(0, strSeparator);
+                    foreach (var k in dicOracle.Keys)
+                    {
+                        sbOracle.Replace(strSeparator + k.ToString() + "=", strSeparator + dicOracle[k] + "=");
+                        if (sbOracle.ToString().IndexOf(dicOracle[k]) <= -1)
+                        {
+                            sbOracle.Append(strSeparator + dicOracle[k] + "=");
+                        }
+                    }
+                    // xoa strSeparator cho dau tien
+                    sbOracle.Remove(0, 1);
+
+                    sbOracle.Replace("oracle", "");
+
+                    strORCL = sbOracle.ToString();
+                }
                 // xoa strSeparator cho dau tien
                 sb.Remove(0, 1);
-
+                
                 // output ref string
                 strResult = sb.ToString();
+                //Xử lý cho SQL
+                // strSQL = BeginString=HNX.TDS.1@BodyLength=694@MsgType=SI@SenderCompID=HNX@SendingTime=20241007-10:04:33@IDSymbol=2724@Symbol=PVS@SecurityType=ST@IssueDate=00010101-12:01:00@CeilingPrice=45600@FloorPrice=37400@SecurityTradingStatus=0@BasicPrice=41500@BestBidPrice=41800@BestBidQtty=56900@BestOfferQtty=95600@BestOfferPrice=41900@TotalBidQtty=2270500.000000@TotalOfferQtty=4515500.000000@MatchQtty=100@MatchPrice=41800@TotalVolumeTraded=1292004.000000@TotalValueTraded=54269221100.000000@BidCount=902@NM_TotalTradedValue=54248060000.000000@BoardCode=LIS_BRD_01@TotalBuyTradingValue=54269221100.000000@TotalBuyTradingQtty=1292004.000000@TotalSellTradingValue=54269221100.000000@TotalSellTradingQtty=1292004.000000@BuyForeignQtty=5200.000000@BuyForeignValue=218040000.000000@RemainForeignQtty=127702116@BuyCount=869@SellCount=869@Parvalue=10000@OpenPrice=37400@PriorOpenPrice=40800@PriorClosePrice=41500@Tradingdate=20241007@Time=10:04:33@TradingUnit=100@TotalListingQtty=477966290.000000@DateNo=4260@MatchValue=4180000.000000@HighestPice=42200@LowestPrice=37400@NM_TotalTradedQtty=1291500.000000@ReferenceStatus=0@TradingSessionID=LIS_CON_NML@TradSesStatus=1@OfferCount=1776@ListingStatus=0@TotalBidQtty_OD=825.000000@TotalOfferQtty_OD=1297.000000@
+                //strSQL = Convert2SQL(strResult, strType);
+
                 return true;
             }
             catch (Exception ex)
             {
                 CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
                 return false;                
+            }
+        }
+        private string Convert2SQL(string strCSV, string strType)
+        {
+            try
+            {
+                string strSQl = "";
+                StringBuilder sbSQL = new StringBuilder(strCSV,strCSV.Length * 2);
+                sbSQL.Replace(((char)1).ToString(), ((char)1).ToString() + "@");
+                string strSPname = TEMPLATE_SP_S5G_HNX_SAVER.Replace("(Type)", strType);
+                sbSQL.Insert(0, strSPname + " @");
+                strSQl = sbSQL.ToString();
+
+                return strSQl;
+            }
+            catch (Exception ex)
+            {
+                CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
+                return "";
             }
         }
         /// <summary>

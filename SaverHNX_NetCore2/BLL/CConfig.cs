@@ -36,6 +36,10 @@ namespace SaverHNX_NetCore2.BLL
 
         //Phan nay cua INI
         public const string INI_SECTION_REDIS = "REDIS";
+        //SQL
+        public const string SQL_EXEC = "EXEC ";
+        public const string SQL_BEGIN_TRANSACTION = "BEGIN TRANSACTION";
+        public const string SQL_COMMIT_TRANSACTION = "COMMIT TRANSACTION";
 
         // monitor
         public static string CHANNEL_MONITOR = "";

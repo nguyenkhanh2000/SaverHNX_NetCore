@@ -2,6 +2,7 @@
 using SaverHNX_NetCore2.Models;
 using SaverHNX_NetCore2.Settings;
 using StackExchange.Redis;
+using System.Text;
 
 namespace SaverHNX_NetCore2.Extensions
 {
@@ -14,6 +15,9 @@ namespace SaverHNX_NetCore2.Extensions
         private List<string> m_lstEndpoints;
         private ConnectionMultiplexer m_ConnectionMultiplexer;
         private IDatabase m_Database;
+
+        private const string TEMPLATE_REDIS_VALUE = "{\"Time\":\"(Now)\",\"Data\":[(RedisData)]}";
+        private const string FORMAT_DATETIME_6 = "yyyy-MM-dd HH:mm:ss.fff";//8:39 AM Friday, April 01, 2016
         public IDatabase RC
         {
             get { return this.m_database; }
@@ -84,6 +88,24 @@ namespace SaverHNX_NetCore2.Extensions
                 CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
             }
         }
+        public bool SetCache(string strKey, string strValue, int intDuration)
+        {
+            try
+            {
+                string strValue_Set = this.AddHeaderFooter(strValue);
+                RC.StringSet(strKey, strValue_Set, TimeSpan.FromMinutes(intDuration));
+
+                string backupKey = "BACKUP:" + DateTime.Today.ToString("yyyy:MM:dd:") + strKey;
+                RC.StringSet(backupKey, strValue_Set, TimeSpan.FromMinutes(intDuration));
+
+                return true;
+            }
+            catch (Exception ex) 
+            {
+                CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
+                return false;
+            }
+        }
         public bool SetCacheBI(string strKey, string strValue, int intDuration)
         {
             bool redis = false;
@@ -103,6 +125,21 @@ namespace SaverHNX_NetCore2.Extensions
             {
                 CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
                 return false;
+            }
+        }
+        private string AddHeaderFooter(string strRedisValue)
+        {
+            StringBuilder sb = new StringBuilder(TEMPLATE_REDIS_VALUE);
+            try
+            {
+                sb = sb.Replace("(Now)", DateTime.Now.ToString(FORMAT_DATETIME_6));  //FORMAT_TIME
+                sb = sb.Replace("(RedisData)", strRedisValue);
+                return sb.ToString();
+            }
+            catch (Exception ex)
+            {
+                CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
+                return "[]";
             }
         }
     }
