@@ -7,6 +7,8 @@ namespace SaverHNX_NetCore2.Settings
         public string FILE_INI_TEMPLATE { get; set; } = string.Empty;
         public string URL_MONITOR_LISTENER { get; set; } = string.Empty;
         public  string CONNECTION_STRING_68 { get; set; } = string.Empty;
+        public string CONNECTION_STRING_DBORACLE {  get; set; } = string.Empty; 
+        public string SPSPIRE_S5G_HNXSAVER_IG_DI_U {  get; set; } = string.Empty;
         public int TIMER_PROCESS_DATA_REDIS {  get; set; }   
         public int TIMER_PROCESS_DATA_DATABASE { get; set; }
         public int SQL_COMMAND_TIMEOUT { get; set; }

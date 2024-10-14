@@ -3,6 +3,7 @@ using SaverHNX_NetCore2.DAL;
 using SaverHNX_NetCore2.Extensions;
 using SaverHNX_NetCore2.Settings;
 using StackExchange.Redis;
+using System.Collections.Concurrent;
 using System.Text;
 using System.Timers;
 using System.Xml.Serialization;
@@ -15,14 +16,19 @@ namespace SaverHNX_NetCore2.BLL
         public const int __CODE_EXIT_APP_FROM_AUTO_EXIT = 2;
         public const int __CODE_EXIT_APP_FROM_FAILED_INIT_QUOTE = 3;
 
+        //monitor5g
+        private CMonitor5G m_M5G;
+
+        private Lazy<ConnectionMultiplexer> lazyConnection;
         private readonly AppSetting _appSetting;
         private readonly CBroker _cBroker;
         private readonly CRedis _cRedis;
         private CDatabase _cDatabase;
+        private COracle _cOracle;
 
-        private Queue<string> m_queueRedis = new Queue<string>();
-        private Queue<string> m_queueSQL = new Queue<string>();
-        private Queue<string> m_queueOracle = new Queue<string>();
+        private ConcurrentQueue<string> m_queueRedis = new ConcurrentQueue<string>();
+        private ConcurrentQueue<string> m_queueSQL = new ConcurrentQueue<string>();
+        private ConcurrentQueue<string> m_queueOracle = new ConcurrentQueue<string>();
 
         private System.Timers.Timer m_tmrGroupREDIS = new System.Timers.Timer();
         private System.Timers.Timer m_tmrGroupSQL = new System.Timers.Timer();
@@ -31,6 +37,7 @@ namespace SaverHNX_NetCore2.BLL
         private readonly SemaphoreSlim semaphoreREDIS = new SemaphoreSlim(1, 1);
         private readonly SemaphoreSlim semaphoreSQL = new SemaphoreSlim(1, 1);
         private readonly SemaphoreSlim semaphoreORACLE = new SemaphoreSlim(1, 1);
+        private readonly SemaphoreSlim semaphoreBroker = new SemaphoreSlim(1, 1);
 
         public CHandCode _cHandCode;
 
@@ -40,9 +47,12 @@ namespace SaverHNX_NetCore2.BLL
             _cBroker = _broker; 
             _cRedis = _redis;            
             _cDatabase = new CDatabase(_setting.SaverSetting);
+            _cOracle = new COracle(_setting.SaverSetting);  
             this._cHandCode = new CHandCode(_setting, _cRedis, _cDatabase);
 
             this.Init();
+
+            //this.InitPubSubData();
 
             //Nếu time < 9h cho xóa key
             DateTime currentTime = DateTime.Now;
@@ -100,6 +110,69 @@ namespace SaverHNX_NetCore2.BLL
                 CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
             }
         }
+        private bool InitPubSubData()
+        {
+            try
+            {
+                ThreadPool.QueueUserWorkItem(x =>
+                {
+                    try
+                    {
+                        var connection = lazyConnection.Value;
+                        var subscriber = connection.GetSubscriber();
+
+                        subscriber.Subscribe(CConfig.CHANNEL_S5G_COMMAND_HNX_SAVER, (channel, msg) =>
+                        {
+                            // Send monitor5G
+                            this.m_M5G.Monitor5G_SendMessage(CMonitor5G.GetLocalDateTime(), CMonitor5G.GetLocalIP(), CMonitor5G.MONITOR_APP.HSX_Saver5G, "InitPubSubData.OnSubscribe=>RedisChannel=" + channel);
+                            try
+                            {
+                                switch (msg)
+                                {
+                                    case CConfig.COMMAND_ACTION_DEBUG:
+                                        string strPath = "";
+                                        this.m_M5G.Monitor5G_SendMessage(CMonitor5G.GetLocalDateTime(), CMonitor5G.GetLocalIP(), CMonitor5G.MONITOR_APP.HNX_Saver5G, "InitPubSubData.DONE => COMMAND_ACTION_DEBUG => BEGIN...");
+                                        strPath = CDebug.AllFields2LogFile(CDebug.GIN(() => this.m_M5G), this.m_M5G);
+                                        this.m_M5G.Monitor5G_SendMessage(CMonitor5G.GetLocalDateTime(), CMonitor5G.GetLocalIP(), CMonitor5G.MONITOR_APP.HNX_Saver5G, "InitPubSubData.DONE => COMMAND_ACTION_DEBUG => " + strPath);
+                                        this.m_M5G.Monitor5G_SendMessage(CMonitor5G.GetLocalDateTime(), CMonitor5G.GetLocalIP(), CMonitor5G.MONITOR_APP.HNX_Saver5G, "InitPubSubData.DONE => COMMAND_ACTION_DEBUG => DONE!!!");
+                                        break;
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
+                            }
+                        });
+
+                        // OnSubscribe event handler (inside subscription logic)
+                        subscriber.Unsubscribe(CConfig.CHANNEL_S5G_COMMAND_HNX_SAVER, (channel, count) =>
+                        {
+                            try
+                            {
+                                // OnUnsubscribe logic
+                                this.m_M5G.Monitor5G_SendMessage(CMonitor5G.GetLocalDateTime(), CMonitor5G.GetLocalIP(), CMonitor5G.MONITOR_APP.HSX_Saver5G, $"InitPubSubData.OnUnsubscribe=>RedisChannel={channel}");
+                            }
+                            catch (Exception ex)
+                            {
+                                // Error handling for OnUnsubscribe logic
+                                CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
+                            }
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
+                    }
+                });
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
+                return false;
+            }
+        }
         private void TimerProc_GroupREDIS_Wrapper(object sender, ElapsedEventArgs e)
         {
             TimerProc_GroupREDIS().GetAwaiter().GetResult();
@@ -114,7 +187,7 @@ namespace SaverHNX_NetCore2.BLL
         }
         public async Task ReceiveMessageFromMessageQueue(string messageBlock)
         {
-            //await semaphoreBroker.WaitAsync();
+            await semaphoreBroker.WaitAsync();
             try
             {                  
                 ProcessDataSingle(messageBlock);
@@ -123,10 +196,10 @@ namespace SaverHNX_NetCore2.BLL
             {
                 CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));  
             }
-            //finally
-            //{
-            //    semaphoreBroker.Release();
-            //}
+            finally
+            {
+                semaphoreBroker.Release();
+            }
         }
         private void ProcessDataSingle(string strMessage)
         {
@@ -137,20 +210,28 @@ namespace SaverHNX_NetCore2.BLL
                 CLog.LogEx("ReceviedMsg.txt", $"ProcessDataSingle:1->Received message: {strMessage}");
                 
                 string strCSV = "";
-                string strSQL = "";
                 string strORCL = "";
                 // Hàm xử lý msg FIX Msg -> msg CSV
                 strCSV = this._cHandCode.Message2CSV(strMessage, ref strORCL);
 
-                if (!string.IsNullOrEmpty(strMessage))
+                if (!string.IsNullOrEmpty(strCSV))
                 {
                     //ghi log strCSV
-                    CLog.LogEx("strCSV_message.txt", JsonConvert.SerializeObject(strCSV));
+                    //CLog.LogEx("strCSV_message.txt", JsonConvert.SerializeObject(strCSV));
                     //Đẩy cho queue Redis
-                    this.m_queueRedis.Enqueue(strCSV);                   
+                    if(this.m_queueRedis != null)
+                        this.m_queueRedis.Enqueue(strCSV);              
 
-                    this.m_queueSQL.Enqueue(strCSV);
-                    //this.m_queueOracle.Enqueue(strCSV);
+                    //Thread.Sleep(10);
+                    if(this.m_queueSQL != null)
+                        this.m_queueSQL.Enqueue(strCSV);
+                }
+                if (!string.IsNullOrEmpty(strORCL))
+                {
+                    if (this.m_queueOracle != null)
+                        this.m_queueOracle.Enqueue(strORCL);
+                    //CLog.LogEx("DI.sql", strORCL);
+                    
                 }
             }
             catch (Exception ex)
@@ -179,25 +260,22 @@ namespace SaverHNX_NetCore2.BLL
             await semaphoreREDIS.WaitAsync();
             try
             {
+                string strCSV = "";
                 int intTotalRow = 0;
-                while (this.m_queueRedis.Count > 0){
-
+                while(this.m_queueRedis.TryDequeue(out strCSV))
+                {
                     string strLogonInfor = "";
-                    //Get msg dau tien trong queue
-                    string strCSV = this.m_queueRedis.Dequeue();
-                    CLog.LogEx("Test_msg_Redis.txt", strCSV);
-                    //strCSV có thể lấy ra giá trị null
-                    if(!string.IsNullOrEmpty(strCSV))
+                    if (!string.IsNullOrEmpty(strCSV))
                     {
-                        CLog.LogEx("Dequeue_MSG.txt", strCSV);
+                        CLog.LogEx("Dequeue_msg_REDIS.txt", strCSV);
                         this._cHandCode.ProcessDataRedis(strCSV, ref strLogonInfor);
-                    }                   
-                    if(strLogonInfor != "")
+                    }
+                    if (strLogonInfor != "")
                     {
                         //insertRedis + Pub Monitor
                     }
-                    
                 }
+
             }
             catch (Exception ex) 
             {
@@ -208,6 +286,67 @@ namespace SaverHNX_NetCore2.BLL
                 semaphoreREDIS.Release();
             }
         }
+        //private async Task TimerProc_GroupSQL()
+        //{
+        //    await semaphoreSQL.WaitAsync();
+        //    try
+        //    {
+        //        StringBuilder sbAllSQL = new StringBuilder("");
+        //        int intTotalRow = 0;
+        //        int batchSize = 1000; // Limit 1000 msg
+        //        int batchCounter = 0; // Theo dõi số lượng msg đc xử lý
+
+        //        while (this.m_queueSQL.Count > 0)
+        //        {
+        //            // Dequeue the message
+        //            string strCSV = this.m_queueSQL.Dequeue();
+
+        //            // Check if message is valid
+        //            if (!string.IsNullOrEmpty(strCSV))
+        //            {
+        //                // Add message to the StringBuilder for processing
+        //                sbAllSQL.Append(Environment.NewLine + CConfig.SQL_EXEC + strCSV);
+        //                intTotalRow++;
+        //                batchCounter++;
+
+        //                // Khi đạt limit batchSize -> Xử lý 
+        //                if (batchCounter >= batchSize)
+        //                {
+        //                    // Add transaction control SQL
+        //                    sbAllSQL.Insert(0, CConfig.SQL_BEGIN_TRANSACTION + Environment.NewLine);
+        //                    sbAllSQL.Append(Environment.NewLine + CConfig.SQL_COMMIT_TRANSACTION);
+
+        //                    // Convert StringBuilder to string for SQL execution
+        //                    string strTransaction = sbAllSQL.ToString();
+        //                    this._cHandCode.ProcessDataSQL(strTransaction);
+
+        //                    // Reset StringBuilder and counters for the next batch
+        //                    sbAllSQL.Clear();
+        //                    batchCounter = 0;
+        //                }
+        //            }
+        //        }
+
+        //        // Xử lý dữ liệu còn lại nếu có
+        //        if (batchCounter > 0)
+        //        {
+        //            sbAllSQL.Insert(0, CConfig.SQL_BEGIN_TRANSACTION + Environment.NewLine);
+        //            sbAllSQL.Append(Environment.NewLine + CConfig.SQL_COMMIT_TRANSACTION);
+
+        //            string strTransaction = sbAllSQL.ToString();
+        //            this._cHandCode.ProcessDataSQL(strTransaction);
+        //        }
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
+        //    }
+        //    finally
+        //    {
+        //        semaphoreSQL.Release();
+        //    }
+        //}
+
         private async Task TimerProc_GroupSQL()
         {
             await semaphoreSQL.WaitAsync();
@@ -215,49 +354,23 @@ namespace SaverHNX_NetCore2.BLL
             {
                 StringBuilder sbAllSQL = new StringBuilder("");
                 int intTotalRow = 0;
-                int batchSize = 1000; // Limit 1000 msg
-                int batchCounter = 0; // Theo dõi số lượng msg đc xử lý
-
-                while (this.m_queueSQL.Count > 0)
+                string strCSV = "";
+                while (this.m_queueSQL.TryDequeue(out strCSV))
                 {
-                    // Dequeue the message
-                    string strCSV = this.m_queueSQL.Dequeue();
-
-                    // Check if message is valid
                     if (!string.IsNullOrEmpty(strCSV))
                     {
-                        // Add message to the StringBuilder for processing
+                        CLog.LogEx("Dequeue_msg_SQL.txt", strCSV);
                         sbAllSQL.Append(Environment.NewLine + CConfig.SQL_EXEC + strCSV);
-                        intTotalRow++;
-                        batchCounter++;
-
-                        // Khi đạt limit batchSize -> Xử lý 
-                        if (batchCounter >= batchSize)
-                        {
-                            // Add transaction control SQL
-                            sbAllSQL.Insert(0, CConfig.SQL_BEGIN_TRANSACTION + Environment.NewLine);
-                            sbAllSQL.Append(Environment.NewLine + CConfig.SQL_COMMIT_TRANSACTION);
-
-                            // Convert StringBuilder to string for SQL execution
-                            string strTransaction = sbAllSQL.ToString();
-                            this._cHandCode.ProcessDataSQL(strTransaction);
-
-                            // Reset StringBuilder and counters for the next batch
-                            sbAllSQL.Clear();
-                            batchCounter = 0;
-                        }
+                        //this._cHandCode.ProcessDataSQL(strCSV);
                     }
                 }
-
-                // Xử lý dữ liệu còn lại nếu có
-                if (batchCounter > 0)
+                if(sbAllSQL.Length > 0)
                 {
                     sbAllSQL.Insert(0, CConfig.SQL_BEGIN_TRANSACTION + Environment.NewLine);
                     sbAllSQL.Append(Environment.NewLine + CConfig.SQL_COMMIT_TRANSACTION);
-
                     string strTransaction = sbAllSQL.ToString();
                     this._cHandCode.ProcessDataSQL(strTransaction);
-                }
+                }  
             }
             catch (Exception ex)
             {
@@ -268,50 +381,23 @@ namespace SaverHNX_NetCore2.BLL
                 semaphoreSQL.Release();
             }
         }
-
-        //private async Task TimerProc_GroupSQL()
-        //{
-        //    await semaphoreSQL.WaitAsync();
-        //    try
-        //    {
-        //        StringBuilder sbAllSQL = new StringBuilder("");
-        //        int intTotalRow = 0;
-
-        //        while (this.m_queueSQL.Count > 0)
-        //        {
-        //            intTotalRow++;                    
-
-        //            string strCSV = this.m_queueSQL.Dequeue();
-        //            //Xử lý data chính => Insert DB
-        //            if (!string.IsNullOrEmpty(strCSV))
-        //            {
-        //                sbAllSQL.Append(Environment.NewLine + CConfig.SQL_EXEC + strCSV);
-        //                //this._cHandCode.ProcessDataSQL(strCSV);
-        //            }    
-        //        }
-        //        if(intTotalRow > 1000)
-        //        {
-        //            sbAllSQL.Insert(0, CConfig.SQL_BEGIN_TRANSACTION + Environment.NewLine);
-        //            sbAllSQL.Append(Environment.NewLine + CConfig.SQL_COMMIT_TRANSACTION);
-        //            string strTransaction = sbAllSQL.ToString();
-        //            this._cHandCode.ProcessDataSQL(strTransaction);
-        //        }
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
-        //    }
-        //    finally 
-        //    { 
-        //        semaphoreSQL.Release(); 
-        //    }
-        //}
         private async Task TimerProc_GroupORACLE()
         {
             await semaphoreORACLE.WaitAsync();
             try
             {
-
+                List<string> resultList = new List<string>();
+                int intTotalRow = 0;
+                string strCSV = "";
+                while(this.m_queueOracle.TryDequeue(out strCSV))
+                {
+                    if (!string.IsNullOrEmpty(strCSV))
+                    {
+                        CLog.LogEx("Dequeue_msg_ORACLE.txt", strCSV);
+                        _cOracle.InsertDataHNXDI(strCSV);
+                    }
+                    intTotalRow++;
+                }                 
             }
             catch (Exception ex)
             {

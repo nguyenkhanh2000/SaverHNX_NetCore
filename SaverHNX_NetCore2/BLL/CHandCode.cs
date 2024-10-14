@@ -71,8 +71,8 @@ namespace SaverHNX_NetCore2.BLL
 
         private const string REGEX_CHECK_DI_VAL = "(MsgType='DI')";
         //PO
-        private const string REGEX_RD_CHECK_IS_PO = @"\bMsgType='PO'\b";
-        private const string REGEX_SQL_GET_PROP_VAL_4_PO = @"\bMsgType='(?<MsgType>PO)'.*?\bSendingTime='(?<SendingTime>[^']*)',\bSymbol='(?<Symbol>[^']*)'.*?\bBidPrice_1='(?<BidPrice_1>[^']*)',\bBidQtty_1='(?<BidQtty_1>[^']*)',\bBidPrice_2='(?<BidPrice_2>[^']*)',\bBidQtty_2='(?<BidQtty_2>[^']*)',\bBidPrice_3='(?<BidPrice_3>[^']*)',\bBidQtty_3='(?<BidQtty_3>[^']*)',\bOfferPrice_1='(?<OfferPrice_1>[^']*)',\bOfferQtty_1='(?<OfferQtty_1>[^']*)',\bOfferPrice_2='(?<OfferPrice_2>[^']*)',\bOfferQtty_2='(?<OfferQtty_2>[^']*)',\bOfferPrice_3='(?<OfferPrice_3>[^']*)',\bOfferQtty_3='(?<OfferQtty_3>[^']*)'";
+        private const string REGEX_RD_CHECK_IS_PO = "@MsgType='PO'";
+        private const string REGEX_SQL_GET_PROP_VAL_4_PO = "@MsgType='PO'.*?@SendingTime='(?<SendingTime>.*?)',@Symbol='(?<Symbol>.*?)'.*?@BidPrice_1='(?<BidPrice_1>.*?)',@BidQtty_1='(?<BidQtty_1>.*?)',@BidPrice_2='(?<BidPrice_2>.*?)',@BidQtty_2='(?<BidQtty_2>.*?)',@BidPrice_3='(?<BidPrice_3>.*?)',@BidQtty_3='(?<BidQtty_3>.*?)',@OfferPrice_1='(?<OfferPrice_1>.*?)',@OfferQtty_1='(?<OfferQtty_1>.*?)',@OfferPrice_2='(?<OfferPrice_2>.*?)',@OfferQtty_2='(?<OfferQtty_2>.*?)',@OfferPrice_3='(?<OfferPrice_3>.*?)',@OfferQtty_3='(?<OfferQtty_3>.*?)'";
         const string TEMPLATE_JSONC_PO = "{\"T\":\"(T)\",\"S\":\"(S)\",\"BP1\":(BP1),\"BQ1\":(BQ1),\"BP2\":(BP2),\"BQ2\":(BQ2),\"BP3\":(BP3),\"BQ3\":(BQ3),\"SP1\":(SP1),\"SQ1\":(SQ1),\"SP2\":(SP2),\"SQ2\":(SQ2),\"SP3\":(SP3),\"SQ3\":(SQ3)}";    //
         private const string TEMPLATE_REDIS_KEY_PO = "PO:S5G_(Symbol)"; //   PO:S5G_(Symbol)
         //realtime => REDIS
@@ -90,6 +90,7 @@ namespace SaverHNX_NetCore2.BLL
         private const string TEMPLATE_JSONC = "{\"STime\":\"(STime)\",\"SI\":{(SI)},\"TP\":{(TP)}}"; // {"SI":{}, "TP":{"ST":"20151119-09:00:21","NTP":"2","BBP1":"19900","BBQ1":"3000","BBP2":"18500","BBQ2":"1000"}}
         private const string TYPE_SI = "SI";
         private const string TYPE_TP = "TP";
+
         //const SQL
         // ten SP se tao theo quy tac
         //prc_S5G_HNX_SAVER_IG_SI_UPDATE
@@ -820,7 +821,7 @@ namespace SaverHNX_NetCore2.BLL
                 string strSPname = "";
 
                 // replace so thanh chu
-                this.ReplaceTags(strMessage, ref strType, ref strResult, ref strORCL);
+                this.ReplaceTags(strMessage, ref strType, ref strResult, ref strORCL, REPLACE_TAGS.FOR_DB);
 
                 if (strResult == "" )
                     return "";
@@ -884,7 +885,7 @@ namespace SaverHNX_NetCore2.BLL
         /// </summary>
         /// <param name="strInput"></param>
         /// <returns></returns>
-        public bool ReplaceTags(string strMessage, ref string strType, ref string strResult, ref string strORCL)
+        public bool ReplaceTags(string strMessage, ref string strType, ref string strResult, ref string strORCL, REPLACE_TAGS RT)
         {
             try
             {
@@ -933,7 +934,7 @@ namespace SaverHNX_NetCore2.BLL
                         break;
                     case MSG_TYPE_DERIVATIVES_INFO:   // "DI";
                         dic = this.m_dicDI;
-                        //dicOracle = this.m_dicDIO;
+                        dicOracle = this.m_dicDIO;
                         break;
                     case MSG_TYPE_DERIVATIVES_INFO_A_LOGIN:
                         dic = this.m_dicLogon;
@@ -953,7 +954,10 @@ namespace SaverHNX_NetCore2.BLL
                 // replace moi ky tu so thanh keyword
                 foreach (int k in dic.Keys)
                 {
-                    sb.Replace(strSeparator + k.ToString() + "=", strSeparator + dic[k] + "=");
+                    if (RT == REPLACE_TAGS.FOR_DB)
+                        sb.Replace(strSeparator + k.ToString() + "=", strSeparator + dic[k] + "=");
+                    if (RT == REPLACE_TAGS.FOR_PUB)
+                        sb.Replace(strSeparator + k.ToString() + "=", strSeparator + "f" + k.ToString() + "=");
                 }
                 if (dicOracle != null)
                 {
