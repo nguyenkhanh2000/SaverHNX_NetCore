@@ -12,6 +12,8 @@ namespace SaverHNX_NetCore2.Settings
         public int TIMER_PROCESS_DATA_REDIS {  get; set; }   
         public int TIMER_PROCESS_DATA_DATABASE { get; set; }
         public int SQL_COMMAND_TIMEOUT { get; set; }
+        public string TIME_STOP_TRUNCATE_DB { get; set; } = string.Empty;
+        public string prc_S5G_HNX_SAVER_IG__CLEAR { get; set; } = "";
         public static SaverSetting MapValue(IConfiguration config)
         {
             var setting = config.Get<SaverSetting>();  

@@ -59,7 +59,7 @@ namespace SaverHNX_NetCore2.BLL
         public static string REDIS_KEY_FULL_ROW_HA;
         public static string REDIS_CHANNEL_IG_PRO;
         public static string REDIS_KEY_IG_HNX_LIST;
-        public static string REDIS_KEY_S5G_IG_LOGON = "";
+        //public static string REDIS_KEY_S5G_IG_LOGON = "";
         public static string REDIS_KEY_IG_HNX_LIST_DS;
         //
         public const string INI_SECTION_CHART_DATA = "CHART_DATA";
@@ -84,7 +84,7 @@ namespace SaverHNX_NetCore2.BLL
             {
                 CIniFile CIF = new CIniFile(_saverSetting.FILE_INI_TEMPLATE);
 
-                CHANNEL_MONITOR = CIF.IniReadValue(CConfig.INI_SECTION_REDIS, CConfig.INI_KEY_CHANNELMONITOR);//ChannelMONITOR=S5G_MONITOR
+                CHANNEL_MONITOR = "S5G_MONITOR_NEW";/*CIF.IniReadValue(CConfig.INI_SECTION_REDIS, CConfig.INI_KEY_CHANNELMONITOR);*///ChannelMONITOR=S5G_MONITOR
                 CHANNEL_COMMAND_HNX_VD = CIF.IniReadValue(CConfig.INI_SECTION_REDIS, CConfig.INI_KEY_CHANNELCOMMAND_HNX_VD); // ChannelCOMMANDHNX=S5G_COMMAND_HNX
                 CHANNEL_COMMAND_HNX_SAVER = CIF.IniReadValue(CConfig.INI_SECTION_REDIS, CConfig.INI_KEY_CHANNELCOMMAND_HNX_SAVER); //ChannelCOMMANDHNXSAVER=S5G_COMMAND_HNX_SAVER
 
@@ -97,7 +97,7 @@ namespace SaverHNX_NetCore2.BLL
 
                 //  2018-10-22 15:54:52 hungpv
                 CConfig.REDIS_KEY_IG_HNX_LIST = CIF.IniReadValue(CConfig.INI_SECTION_IG_REDIS, CConfig.INI_KEY_LIST);
-                CConfig.REDIS_KEY_S5G_IG_LOGON = CIF.IniReadValue(CConfig.INI_SECTION_IG_REDIS, CConfig.INI_KEY_S5G_IG_LOGON);
+                //CConfig.REDIS_KEY_S5G_IG_LOGON = CIF.IniReadValue(CConfig.INI_SECTION_IG_REDIS, CConfig.INI_KEY_S5G_IG_LOGON);
             }
             catch (Exception ex)
             {

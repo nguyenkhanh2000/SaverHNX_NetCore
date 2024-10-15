@@ -63,7 +63,7 @@ namespace SaverHNX_NetCore2.BLL
         private const string REGEX_TYPE_BOARD_INFO = @"\bMsgType='BI'\b";
         private const string REGEX_CSV_CHECK_IS_SI_TP = "(MsgType='TP|SI')";
         private const string REGEX_TYPE_DERIVATIVES_INFO_A_LOGIN = "(MsgType='A')";
-        private const string REGEX_LOGONINFO = @"\bLogon_Infor\b='([^']*)'";
+        private const string REGEX_LOGONINFO = @"Logon_Infor='([^']*)'";
         private const string REGEX_RD_GET_SYMBOL = @"\bSymbol='([^']*)'";
 
         private const string REGEX_RD_GET_PROP_VAL_4_LE = @"(?<Data>\bTime\b|\bMatchPrice\b|\bNM_TotalTradedValue\b|\bNM_TotalTradedQtty\b)='(?<Val>.*?)'";
@@ -100,11 +100,13 @@ namespace SaverHNX_NetCore2.BLL
         private CRedis m_RC;
         private AppSetting _appsetting;
         private CDatabase _cDatabase;
-        public CHandCode(AppSetting _appsetting, CRedis _cRedis, CDatabase cdatabase)
+        private CTracker _cTracker;
+        public CHandCode(AppSetting _appsetting, CRedis _cRedis, CDatabase cdatabase, CTracker _tracker)
         {
             this.m_RC = _cRedis;
             this._appsetting = _appsetting;
             this._cDatabase = cdatabase;
+            this._cTracker = _tracker;
 
             this.m_dicI = this.InitDic(MSG_TYPE_INDEX);                  // MSG_TYPE_MESSAGE_INDEX = "I";
             this.m_dicS = this.InitDic(MSG_TYPE_BASKET_INDEX);           // MSG_TYPE_BASKET_INDEX = "S";
@@ -141,18 +143,12 @@ namespace SaverHNX_NetCore2.BLL
                         Redis_msg_A(strCSV, ref strLogonInfor);
                         break;
                     case "SI":
-                        //Hàm xử lý REDIS key REALTIME:S5G_A32
-                        //InsertRealtime2Redis(strCSV);
-                        //Hàm xử lý REDIS key LE
-                        //InsertLE2Redis(strCSV);
                         Task task1 = Task.Run(() => InsertRealtime2Redis(strCSV));
                         Task task2 = Task.Run(() => InsertLE2Redis(strCSV));
                         Task task3 = Task.Run(() => InsertLS2Redis(strCSV));    
                         Task.WaitAll(task1, task2, task3);
                         break;
                     case "TP":
-                        //Nếu có msg TP => Xử lý lại msgCSV 
-                        //string strTP = this.CSV2TopNPrice(strCSV);
                         //Hàm xử lý REDIS key REALTIME:S5G_A32
                         InsertRealtime2Redis(strCSV);
                         break;
@@ -230,6 +226,12 @@ namespace SaverHNX_NetCore2.BLL
                 if (match.Success)
                 {
                     strLogonInfor = match.Groups[1].Value;
+                }
+                double Z_SCORE = Convert.ToDouble(DateTime.Now.ToString(CConfig.FORMAT_TIME_5));
+                // insert ZSet vao redis
+                if (this.m_RC.RC != null) 
+                {
+                    this.m_RC.RC.SortedSetAdd(_appsetting.RedisSetting.KEY_S5G_IG_LOGON, strLogonInfor, Z_SCORE);
                 }
                 return true;
             }
@@ -811,7 +813,7 @@ namespace SaverHNX_NetCore2.BLL
         /// </summary>
         /// <param name="strMessage"></param>
         /// <returns></returns>
-        public string Message2CSV(string strMessage, ref string strORCL)
+        public string Message2CSV(string strMessage, ref string strORCL, ref string strLogon)
         {
             try
             {
@@ -819,12 +821,14 @@ namespace SaverHNX_NetCore2.BLL
                 string strResult = "";                
                 string strCSV = "";
                 string strSPname = "";
+                string[] arrPart = null;
 
                 // replace so thanh chu
-                this.ReplaceTags(strMessage, ref strType, ref strResult, ref strORCL, REPLACE_TAGS.FOR_DB);
+                strResult = this.ReplaceTags(strMessage, ref strType, ref strORCL, ref arrPart ,REPLACE_TAGS.FOR_DB);
 
-                if (strResult == "" )
+                if (string.IsNullOrEmpty(strResult))
                     return "";
+                
                 // tim ra ten SP theo quy tac
                 strSPname = TEMPLATE_SP_S5G_HNX_SAVER.Replace("(Type)", strType);
 
@@ -855,12 +859,12 @@ namespace SaverHNX_NetCore2.BLL
 
                 strCSV = sb.ToString();
 
-                //strCSV = strResult.Replace(((char)1).ToString(), "',")
-                //                      .Replace("=", "='")
-                //                      .TrimEnd(',', ' ');
-                //strSQL = strSQL.Replace(((char)1).ToString(), "',")
-                //                      .Replace("=", "='")
-                //                      .TrimEnd(',', '@', ' ');
+                //Nếu @MsgType='A' => strLogon
+                if (strType == MSG_TYPE_DERIVATIVES_INFO_A_LOGIN)
+                {
+                    strLogon = strCSV;
+                    return "";
+                }
 
                 //Nếu TopNPrice thì xử lý riêng
                 if (strType == MSG_TYPE_TOP_N_PRICE)
@@ -885,11 +889,11 @@ namespace SaverHNX_NetCore2.BLL
         /// </summary>
         /// <param name="strInput"></param>
         /// <returns></returns>
-        public bool ReplaceTags(string strMessage, ref string strType, ref string strResult, ref string strORCL, REPLACE_TAGS RT)
+        public string ReplaceTags(string strMessage, ref string strType, ref string strORCL, ref string[] arrPart ,REPLACE_TAGS RT)
         {
             try
             {
-                string[] arrPart = null;
+                string strResult = "";
                 Dictionary<int, string> dic = null;                     // dic tuy thuoc vao tung type                
                 Dictionary<int, string> dicOracle = null;
                 arrPart = strMessage.Split((char)1);           // cac thong tin dc cach nhau bang ky tu co ma ascii=1 (ko nhin thay dc trong 1 so editor nhu NotePad, phai dung NotePad++ moi thay duoc)
@@ -899,6 +903,7 @@ namespace SaverHNX_NetCore2.BLL
                 // xac dinh type
                 strType = arrPart[2].Substring(3);       // "35=BI"=> "BI"
 
+                
                 // khong the dung chung 1 dic duoc vi number co the giong nhau
                 // VD:
                 // type SI co 15=StockNo
@@ -946,8 +951,7 @@ namespace SaverHNX_NetCore2.BLL
                     //Message		= Invalid character after parsing property name. Expected ':' but got: H. Path 'BlockBody[0].Body', line 1, position 62.
                     //QuoteBaseLib.BLL.CProcessorIG.EntryPoint(String strMessageBlock)|strMessageBlock={"BlockHeader":"DATA","BlockBody":[{"Header":{},"Body":{"}},{"Header":{"f8":"HNX.TDS.1","f9":"134","f35":"PO","f49":"HNX","f52":"201603
                     default:
-                        strResult = "";
-                        return false;
+                        return strResult;
                 }
                 // them strSeparator vao dau tien
                 sb.Insert(0, strSeparator);
@@ -987,12 +991,12 @@ namespace SaverHNX_NetCore2.BLL
                 // strSQL = BeginString=HNX.TDS.1@BodyLength=694@MsgType=SI@SenderCompID=HNX@SendingTime=20241007-10:04:33@IDSymbol=2724@Symbol=PVS@SecurityType=ST@IssueDate=00010101-12:01:00@CeilingPrice=45600@FloorPrice=37400@SecurityTradingStatus=0@BasicPrice=41500@BestBidPrice=41800@BestBidQtty=56900@BestOfferQtty=95600@BestOfferPrice=41900@TotalBidQtty=2270500.000000@TotalOfferQtty=4515500.000000@MatchQtty=100@MatchPrice=41800@TotalVolumeTraded=1292004.000000@TotalValueTraded=54269221100.000000@BidCount=902@NM_TotalTradedValue=54248060000.000000@BoardCode=LIS_BRD_01@TotalBuyTradingValue=54269221100.000000@TotalBuyTradingQtty=1292004.000000@TotalSellTradingValue=54269221100.000000@TotalSellTradingQtty=1292004.000000@BuyForeignQtty=5200.000000@BuyForeignValue=218040000.000000@RemainForeignQtty=127702116@BuyCount=869@SellCount=869@Parvalue=10000@OpenPrice=37400@PriorOpenPrice=40800@PriorClosePrice=41500@Tradingdate=20241007@Time=10:04:33@TradingUnit=100@TotalListingQtty=477966290.000000@DateNo=4260@MatchValue=4180000.000000@HighestPice=42200@LowestPrice=37400@NM_TotalTradedQtty=1291500.000000@ReferenceStatus=0@TradingSessionID=LIS_CON_NML@TradSesStatus=1@OfferCount=1776@ListingStatus=0@TotalBidQtty_OD=825.000000@TotalOfferQtty_OD=1297.000000@
                 //strSQL = Convert2SQL(strResult, strType);
 
-                return true;
+                return strResult;
             }
             catch (Exception ex)
             {
                 CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
-                return false;                
+                return "";                
             }
         }
         private string Convert2SQL(string strCSV, string strType)

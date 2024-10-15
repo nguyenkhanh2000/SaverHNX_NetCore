@@ -4,6 +4,7 @@ using SaverHNX_NetCore2.Extensions;
 using SaverHNX_NetCore2.Settings;
 using StackExchange.Redis;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text;
 using System.Timers;
 using System.Xml.Serialization;
@@ -25,6 +26,7 @@ namespace SaverHNX_NetCore2.BLL
         private readonly CRedis _cRedis;
         private CDatabase _cDatabase;
         private COracle _cOracle;
+        private CTracker _cTracker;
 
         private ConcurrentQueue<string> m_queueRedis = new ConcurrentQueue<string>();
         private ConcurrentQueue<string> m_queueSQL = new ConcurrentQueue<string>();
@@ -33,6 +35,13 @@ namespace SaverHNX_NetCore2.BLL
         private System.Timers.Timer m_tmrGroupREDIS = new System.Timers.Timer();
         private System.Timers.Timer m_tmrGroupSQL = new System.Timers.Timer();
         private System.Timers.Timer m_tmrGroupORACLE = new System.Timers.Timer();
+        //Timer Tracker - Đẩy count msg vào InfluxDb
+        private System.Timers.Timer m_tmrInfluxDB = new System.Timers.Timer();
+        private int _msgCount_RD = 0; // Track message count
+        private int _msgCount_SQL = 0;
+        private int _msgCount_ORCL = 0;
+
+        private bool m_blnTruncateDb = false;
 
         private readonly SemaphoreSlim semaphoreREDIS = new SemaphoreSlim(1, 1);
         private readonly SemaphoreSlim semaphoreSQL = new SemaphoreSlim(1, 1);
@@ -47,12 +56,16 @@ namespace SaverHNX_NetCore2.BLL
             _cBroker = _broker; 
             _cRedis = _redis;            
             _cDatabase = new CDatabase(_setting.SaverSetting);
-            _cOracle = new COracle(_setting.SaverSetting);  
-            this._cHandCode = new CHandCode(_setting, _cRedis, _cDatabase);
+            _cOracle = new COracle(_setting.SaverSetting);
+            _cTracker = new CTracker(_setting.Tracker_Setting);
+            m_M5G = new CMonitor5G(_setting);
+            this._cHandCode = new CHandCode(_setting, _cRedis, _cDatabase, _cTracker);
 
             this.Init();
 
-            //this.InitPubSubData();
+            this.InitPubSubData();
+
+            TruncateDb();
 
             //Nếu time < 9h cho xóa key
             DateTime currentTime = DateTime.Now;
@@ -78,7 +91,17 @@ namespace SaverHNX_NetCore2.BLL
                 this.m_tmrGroupREDIS.Enabled = true;
                 this.m_tmrGroupSQL.Enabled = true;
                 this.m_tmrGroupORACLE.Enabled = true;
+
+                m_tmrInfluxDB.Interval = 5000; // 1 second interval
+                m_tmrInfluxDB.Elapsed += OnInfluxDBTimerElapsed;
+                //m_tmrInfluxDB.Start();
                 Console.WriteLine("Timers started");
+                //send Monitor
+                StringBuilder sbMsg = new StringBuilder("StartTimers: ");
+                //sbMsg.Append(" this.m_crbIG.SrcQueuePath=" + this.m_crbMQ.SrcQueuePath);
+                //sbMsg.Append("; this.m_tmrProcessDataRedis.Interval=" + this.m_tmrProcessDataRedis.Interval.ToString());
+                //sbMsg.Append("; this.m_tmrProcessDataDB.Interval=" + this.m_tmrProcessDataDB.Interval.ToString());
+                this.m_M5G.Monitor5G_SendMessage(CMonitor5G.GetLocalDateTime(), CMonitor5G.GetLocalIP(), CMonitor5G.MONITOR_APP.HNX_Saver5G, sbMsg.ToString());
                 return true;
             }
             catch (Exception ex) 
@@ -104,6 +127,10 @@ namespace SaverHNX_NetCore2.BLL
                 this.m_tmrGroupORACLE.Interval = _appSetting.SaverSetting.TIMER_PROCESS_DATA_DATABASE;
                 this.m_tmrGroupORACLE.Elapsed += TimerProc_GroupORACLE_Wrapper;
 
+                //monitor
+                m_M5G.ChannelMonitor = CConfig.CHANNEL_MONITOR;
+                this.m_M5G.Monitor5G_SendStatusFeeder(CMonitor5G.GetLocalDateTime(), CMonitor5G.GetLocalIP(), CMonitor5G.MONITOR_APP.HNX_Saver5G, 0, 0);
+
             }
             catch (Exception ex) 
             {
@@ -118,8 +145,8 @@ namespace SaverHNX_NetCore2.BLL
                 {
                     try
                     {
-                        var connection = lazyConnection.Value;
-                        var subscriber = connection.GetSubscriber();
+                        var redisDb = _cRedis.RC;
+                        var subscriber = _cRedis.RC.Multiplexer.GetSubscriber();
 
                         subscriber.Subscribe(CConfig.CHANNEL_S5G_COMMAND_HNX_SAVER, (channel, msg) =>
                         {
@@ -173,24 +200,108 @@ namespace SaverHNX_NetCore2.BLL
                 return false;
             }
         }
+        /// <summary>
+        /// xoa tat ca du lieu khi bat dau Start Timer lan dau tien
+        /// </summary>
+        /// <returns></returns>
+        private bool TruncateDb()
+        {
+            CLog.LogEx("flow.js", "TruncateDb()");
+            try
+            {
+                //-------------------------------------
+                // 2021-11-15 11:13:22 ngocta2 khong cho truncate db khi qua gio trong config
+                CLog.LogEx("flow.js", $"CConfig.TIME_STOP_TRUNCATE_DB={_appSetting.SaverSetting.TIME_STOP_TRUNCATE_DB}");
+                string[] arr = _appSetting.SaverSetting.TIME_STOP_TRUNCATE_DB.Split(':');
+                int hour = Convert.ToInt32(arr[0]), minute = Convert.ToInt32(arr[1]);
+                int h = DateTime.Now.Hour, m = DateTime.Now.Minute;
+                // qua moc time nay roi thi exit func >> ko cho truncate
+                if (h > hour || (h == hour && m >= minute))
+                    return true;
+                //-------------------------------------
+
+                if (!this.m_blnTruncateDb)
+                {
+                    // truncate tables
+                    _cDatabase.ExecuteScriptQuoteSaverHNX(_appSetting.SaverSetting.prc_S5G_HNX_SAVER_IG__CLEAR);
+
+                    // send monitor5G
+                    System.Data.SqlClient.SqlConnectionStringBuilder builder = new System.Data.SqlClient.SqlConnectionStringBuilder();
+                    builder.ConnectionString = _appSetting.SaverSetting.CONNECTION_STRING_68;
+                    string strIP = builder.DataSource;
+                    string strDB = builder.InitialCatalog;
+                    StringBuilder sbMsg = new StringBuilder("TruncateDb: ").Append(strIP).Append(".").Append(strDB);
+                    //this.m_crbMQ.Monitor5G_SendMessage(CMonitor5G.GetLocalDateTime(), CMonitor5G.GetLocalIP(), CReaderBaseMQ.MONITOR_APP.HNX_Saver5G, sbMsg.ToString());
+
+                    // update flag
+                    this.m_blnTruncateDb = true;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                CLog.LogError("OnInfluxDBTimerElapsed", CBase.GetDetailError(ex));
+                return false;
+            }
+        }
+        private async void OnInfluxDBTimerElapsed(object sender, ElapsedEventArgs e)
+        {
+            try
+            {
+                // Send the message count to InfluxDB asynchronously
+                 this._cTracker.MsgRD2InfluxDBAsync(_msgCount_RD);
+            }
+            catch (Exception ex)
+            {
+                CLog.LogError("OnInfluxDBTimerElapsed", CBase.GetDetailError(ex));
+            }
+
+            // Reset the message count for the next interval
+            _msgCount_RD = 0;
+        }
         private void TimerProc_GroupREDIS_Wrapper(object sender, ElapsedEventArgs e)
         {
-            TimerProc_GroupREDIS().GetAwaiter().GetResult();
+            try
+            {
+                //TimerProc_GroupREDIS().GetAwaiter().GetResult();
+                _ = TimerProc_GroupREDIS();
+            }
+            catch (Exception ex)
+            {
+                CLog.LogError("TimerProc_GroupREDIS_Wrapper", CBase.GetDetailError(ex));
+            }           
         }
         private void TimerProc_GroupSQL_Wrapper(object sender, ElapsedEventArgs e)
         {
-            TimerProc_GroupSQL().GetAwaiter().GetResult();
+            try
+            {
+                //TimerProc_GroupSQL().GetAwaiter().GetResult();
+                _ = TimerProc_GroupSQL();
+            }
+            catch (Exception ex)
+            {
+                CLog.LogError("TimerProc_GroupSQL_Wrapper", CBase.GetDetailError(ex));
+            }
         }
         private void TimerProc_GroupORACLE_Wrapper(object sender, ElapsedEventArgs e)
         {
-            TimerProc_GroupORACLE().GetAwaiter().GetResult();
+            try
+            {
+                //TimerProc_GroupORACLE().GetAwaiter().GetResult();
+                _ = TimerProc_GroupORACLE();
+            }
+            catch (Exception ex)
+            {
+                CLog.LogError("TimerProc_GroupORACLE_Wrapper", CBase.GetDetailError(ex));
+            }
         }
         public async Task ReceiveMessageFromMessageQueue(string messageBlock)
         {
             await semaphoreBroker.WaitAsync();
             try
-            {                  
-                ProcessDataSingle(messageBlock);
+            {
+                ProcessAndEnqueueMessage(messageBlock);
             }
             catch (Exception ex)
             {
@@ -201,42 +312,71 @@ namespace SaverHNX_NetCore2.BLL
                 semaphoreBroker.Release();
             }
         }
-        private void ProcessDataSingle(string strMessage)
+        /// <summary>
+        /// Hàm xử lý single message FIX
+        /// </summary>
+        /// <param name="strMessage"></param>
+        private void ProcessAndEnqueueMessage(string strMessage)
         {
             try
             {
+                var SW1 = Stopwatch.StartNew(); 
+                var SW2 = Stopwatch.StartNew();
                 if(string.IsNullOrEmpty(strMessage)) return;
+                //Rep message ở đây
+
+
                 //Log nhận msg
                 CLog.LogEx("ReceviedMsg.txt", $"ProcessDataSingle:1->Received message: {strMessage}");
                 
                 string strCSV = "";
                 string strORCL = "";
+                string strLogonInfor = "";
                 // Hàm xử lý msg FIX Msg -> msg CSV
-                strCSV = this._cHandCode.Message2CSV(strMessage, ref strORCL);
+                strCSV = this._cHandCode.Message2CSV(strMessage, ref strORCL, ref strLogonInfor);
 
+                //Nếu có thông tin LogonInfor, chỉ đẩy vào queue Redis và không đẩy vào các queue khác
+                if (!string.IsNullOrEmpty(strLogonInfor))
+                {
+                    EnqueueMsg(this.m_queueRedis, strLogonInfor);
+                    return; // Không xử lý các queue khác nữa
+                }
+
+                // Đẩy CSV vào Redis và SQL 
                 if (!string.IsNullOrEmpty(strCSV))
                 {
-                    //ghi log strCSV
-                    //CLog.LogEx("strCSV_message.txt", JsonConvert.SerializeObject(strCSV));
-                    //Đẩy cho queue Redis
-                    if(this.m_queueRedis != null)
-                        this.m_queueRedis.Enqueue(strCSV);              
-
-                    //Thread.Sleep(10);
-                    if(this.m_queueSQL != null)
-                        this.m_queueSQL.Enqueue(strCSV);
+                    EnqueueMsg(this.m_queueRedis, strCSV);
+                    EnqueueMsg(this.m_queueSQL, strCSV);
+                    //Log Enqueue
+                    CLog.LogEx("Enqueue_RD_SQL.txt", $"MsgEnqueue: {strCSV} - Time 1 msg:{SW1.ElapsedMilliseconds}");
                 }
+
                 if (!string.IsNullOrEmpty(strORCL))
                 {
-                    if (this.m_queueOracle != null)
-                        this.m_queueOracle.Enqueue(strORCL);
-                    //CLog.LogEx("DI.sql", strORCL);
-                    
+                    EnqueueMsg(this.m_queueOracle, strORCL);
+                    //Log Enqueue
+                    CLog.LogEx("Enqueue_Oracle.txt", $"MsgEnqueue: {strORCL} - Time 1 msg:{SW2.ElapsedMilliseconds}");
                 }
             }
             catch (Exception ex)
             {
                 CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
+            }
+        }
+        private bool EnqueueMsg(ConcurrentQueue<string> queue, string message)
+        {
+            try
+            {
+                if (queue != null && !string.IsNullOrEmpty(message))
+                {
+                    queue.Enqueue(message);
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
+                return false;
             }
         }
         private void ClearLE2LSKeys()
@@ -261,21 +401,23 @@ namespace SaverHNX_NetCore2.BLL
             try
             {
                 string strCSV = "";
-                int intTotalRow = 0;
+                //int intTotalRow = 0;
                 while(this.m_queueRedis.TryDequeue(out strCSV))
                 {
+                    var CW = Stopwatch.StartNew();
                     string strLogonInfor = "";
                     if (!string.IsNullOrEmpty(strCSV))
                     {
-                        CLog.LogEx("Dequeue_msg_REDIS.txt", strCSV);
                         this._cHandCode.ProcessDataRedis(strCSV, ref strLogonInfor);
+                        _msgCount_RD++;
+                        CLog.LogEx("Dequeue_msg_REDIS.txt", $"Dequeue_REDIS: {strCSV} - Time: {CW.ElapsedMilliseconds}"); 
                     }
                     if (strLogonInfor != "")
                     {
                         //insertRedis + Pub Monitor
+                        
                     }
                 }
-
             }
             catch (Exception ex) 
             {
@@ -361,7 +503,7 @@ namespace SaverHNX_NetCore2.BLL
                     {
                         CLog.LogEx("Dequeue_msg_SQL.txt", strCSV);
                         sbAllSQL.Append(Environment.NewLine + CConfig.SQL_EXEC + strCSV);
-                        //this._cHandCode.ProcessDataSQL(strCSV);
+
                     }
                 }
                 if(sbAllSQL.Length > 0)

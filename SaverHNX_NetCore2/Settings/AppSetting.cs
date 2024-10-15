@@ -7,6 +7,7 @@
         public RedisSetting RedisSetting { get; set; }
         public Setting_IP_LAN Setting_IP_LAN { get; set;}
         public SaverSetting SaverSetting { get; set; }  
+        public Tracker_Setting Tracker_Setting { get; set; }
         public static AppSetting MapValue(IConfiguration _config)
         {
             var _baseSetting = BaseSetting.MapValue(_config.GetSection(nameof(BaseSetting)));
@@ -14,6 +15,7 @@
             var _redisSetting = RedisSetting.MapValue(_config.GetSection(nameof(RedisSetting)));
             var _ipSetting = Setting_IP_LAN.MapValue(_config.GetSection(nameof(Setting_IP_LAN)));
             var _saverSetting = SaverSetting.MapValue(_config.GetSection(nameof(SaverSetting)));
+            var _trackerSetting = Tracker_Setting.MapValue(_config.GetSection(nameof(Tracker_Setting)));
             return new AppSetting
             {
                 BaseSetting = _baseSetting,
@@ -21,6 +23,7 @@
                 RedisSetting = _redisSetting,
                 Setting_IP_LAN = _ipSetting,
                 SaverSetting = _saverSetting,
+                Tracker_Setting = _trackerSetting,
             };
         }
     }

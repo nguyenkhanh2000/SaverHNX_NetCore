@@ -11,6 +11,7 @@ namespace SaverHNX_NetCore2.Settings
         public string TEMPLATE_REDIS_KEY_KL_LS { get; set; } = string.Empty;
         public string KEY_DELETE_REDIS_TKTT { get; set; } = string.Empty;
         public string KEY_DELETE_REDIS_LS { get; set; } = string.Empty;
+        public string KEY_S5G_IG_LOGON { get; set; } = string.Empty;    
 
         public static RedisSetting MapValue(IConfiguration _config)
         {
