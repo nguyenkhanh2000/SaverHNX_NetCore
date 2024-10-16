@@ -129,8 +129,9 @@ namespace SaverHNX_NetCore2.BLL
             FOR_PUB,                                                            // de pub vao channel : 425 => f425
             FOR_DB                                                              // de exec sp insert db : 425 => BoardCode
         }
-        public void ProcessDataRedis(string strCSV, ref string strLogonInfor)
+        public async Task<string> ProcessDataRedis(string strCSV)
         {
+            string strLogonInfor = "";
             try
             {
                 //Lấy ra type của strCSV => switch case xử lý theo type
@@ -140,22 +141,24 @@ namespace SaverHNX_NetCore2.BLL
                 switch (strCSVType)
                 {
                     case "A":
-                        Redis_msg_A(strCSV, ref strLogonInfor);
+                        Redis_msg_A(strCSV, ref strLogonInfor);                        
                         break;
                     case "SI":
-                        Task task1 = Task.Run(() => InsertRealtime2Redis(strCSV));
-                        Task task2 = Task.Run(() => InsertLE2Redis(strCSV));
-                        Task task3 = Task.Run(() => InsertLS2Redis(strCSV));    
-                        Task.WaitAll(task1, task2, task3);
+                        //Task task1 = Task.Run(() => InsertRealtime2Redis(strCSV));
+                        //Task task2 = Task.Run(() => InsertLE2Redis(strCSV));
+                        //Task task3 = Task.Run(() => InsertLS2Redis(strCSV));    
+                        //Task.WaitAll(task1, task2, task3);
+                        await Task.WhenAll(InsertRealtime2Redis(strCSV), InsertLE2Redis(strCSV), InsertLS2Redis(strCSV));
                         break;
                     case "TP":
                         //Hàm xử lý REDIS key REALTIME:S5G_A32
                         InsertRealtime2Redis(strCSV);
                         break;
                     case "DI":
-                        Task taskDI = Task.Run(() => InsertLE2Redis(strCSV));
-                        Task taskDI2 = Task.Run(() => InsertLS2Redis(strCSV));
-                        Task.WaitAll(taskDI, taskDI2);  
+                        //Task taskDI = Task.Run(() => InsertLE2Redis(strCSV));
+                        //Task taskDI2 = Task.Run(() => InsertLS2Redis(strCSV));
+                        //Task.WaitAll(taskDI, taskDI2);  
+                        await Task.WhenAll(InsertLE2Redis(strCSV), InsertLS2Redis(strCSV));
                         break ;
                     case "BI":
                         //Hàm xử lý REDIS key S5G_HNX_BI
@@ -172,6 +175,7 @@ namespace SaverHNX_NetCore2.BLL
             {
                 CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
             }
+            return strLogonInfor;
         }
         /// <summary>
         /// strCSV = "BeginString='HNX.TDS.1',BodyLength='528',MsgType='TP',SenderCompID='HNX',SendingTime='20241007-09:59:59',Symbol='VN30F2410',BoardCode='DER_BRD_01',NoTopPrice='10',NumTopPrice='1',BestBidPrice='1344.50',BestBidQtty='26',BestOfferPrice='1344.60',BestOfferQtty='121',NumTopPrice='2',BestBidPrice='1344.40',BestBidQtty='16',BestOfferPrice='1344.80',BestOfferQtty='283',NumTopPrice='3',BestBidPrice='1344.30',BestBidQtty='61',BestOfferPrice='1344.90',BestOfferQtty='26',NumTopPrice='4',BestBidPrice='1344.20',BestBidQtty='61',BestOfferPrice='1345',BestOfferQtty='297',NumTopPrice='5',BestBidPrice='1344.10',BestBidQtty='180',BestOfferPrice='1345.20',BestOfferQtty='57',NumTopPrice='6',BestBidPrice='1344',BestBidQtty='178',BestOfferPrice='1345.30',BestOfferQtty='68',NumTopPrice='7',BestBidPrice='1343.90',BestBidQtty='8',BestOfferPrice='1345.40',BestOfferQtty='38',NumTopPrice='8',BestBidPrice='1343.80',BestBidQtty='82',BestOfferPrice='1345.50',BestOfferQtty='59',NumTopPrice='9',BestBidPrice='1343.70',BestBidQtty='16',BestOff..."
@@ -246,7 +250,7 @@ namespace SaverHNX_NetCore2.BLL
         /// </summary>
         /// <param name="strSI_TP"></param>
         /// <returns></returns>
-        private bool InsertRealtime2Redis(string strSI_TP)
+        private async Task InsertRealtime2Redis(string strSI_TP)
         {
             try
             {
@@ -307,12 +311,10 @@ namespace SaverHNX_NetCore2.BLL
                 {
                     m_RC.RC.SortedSetAdd(Z_KEY, Z_VALUE, Z_SCORE);
                 }
-                return true;
             }
             catch (Exception ex)
             {
                 CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
-                return false ;
             }
         }
         /// <summary>
@@ -459,11 +461,11 @@ namespace SaverHNX_NetCore2.BLL
         /// </summary>
         /// <param name="strLS"></param>
         /// <returns></returns>
-        private bool InsertLS2Redis(string strLS)
+        private async Task InsertLS2Redis(string strLS)
         {
             try
             {
-                if (strLS == "") return false;
+                if (strLS == "") return;
 
                 //Kiểm tra nếu strLS có DI
                 bool checkDI = Regex.IsMatch(strLS, REGEX_CHECK_DI_VAL);
@@ -493,23 +495,23 @@ namespace SaverHNX_NetCore2.BLL
                             ls.MT = strVal;
                             break;
                         case LE_MP_LONG:    //"MatchPrice":
-                            if (!CBase.IsNumeric(strVal)) return false;// ko phai so thi return luon
+                            if (!CBase.IsNumeric(strVal)) return;// ko phai so thi return luon
                             ls.MP = Convert.ToDouble(strVal);
                             //ls.MP = Convert.ToInt32(strVal);
                             break;
 
                         case LE_MQ_LONG:    //"MatchQtty":
-                            if (!CBase.IsNumeric(strVal)) return false;// ko phai so thi return luon
+                            if (!CBase.IsNumeric(strVal)) return;// ko phai so thi return luon
                             ls.MQ = long.Parse(strVal.Replace(".000000", ""));
                             break;
                         case LE_TQ_LONG: //NM_TotalTradedQtty
-                            if (!CBase.IsNumeric(strVal)) return false;// ko phai so thi return luon
+                            if (!CBase.IsNumeric(strVal)) return ;// ko phai so thi return luon
                             string strOldNMQtty_LS = Dic_GetValue(this.m_dicLS_NM_TotalTradedQtty, strSymbol, "0");
                             string strNewNMQtty = strVal;
 
                             // thong tin moi van giong thong tin cu thi exit 
                             if (strOldNMQtty_LS == strNewNMQtty)
-                                return false;
+                                return ;
                             else
                                 Dic_AddOrUpdate(ref this.m_dicLS_NM_TotalTradedQtty, strSymbol, strNewNMQtty);
                             break;
@@ -520,7 +522,7 @@ namespace SaverHNX_NetCore2.BLL
                 }
                 // ko co match thi return ""
                 if (intMatchCount <= 1)
-                    return false;
+                    return ;
 
                 // Lấy thời gian hiện tại (local time)
                 DateTime localDateTime = DateTime.Now;
@@ -551,14 +553,21 @@ namespace SaverHNX_NetCore2.BLL
                 string Z_KEY = _appsetting.RedisSetting.TEMPLATE_REDIS_KEY_KL_LS.Replace("(Symbol)", strSymbol);
                 double Z_SCORE = unixTimestamp;
                 string Z_VALUE = strJsonC;
-                if (m_RC.RC != null)
-                    m_RC.RC.SortedSetAdd(Z_KEY, Z_VALUE, Z_SCORE);
-                return true;
+                try
+                {
+                    if (m_RC.RC != null)
+                        m_RC.RC.SortedSetAdd(Z_KEY, Z_VALUE, Z_SCORE);
+                }
+                catch (Exception ex)
+                {
+                    CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
+                    return;
+                }
             }
             catch (Exception ex)
             {
                 CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
-                return false;
+                return ;
             }
         }
         /// <summary>
@@ -566,11 +575,11 @@ namespace SaverHNX_NetCore2.BLL
         /// </summary>
         /// <param name="strLE"></param>
         /// <returns></returns>
-        private bool InsertLE2Redis(string strLE)
+        private async Task InsertLE2Redis(string strLE)
         {
             try
             {
-                if(strLE == "") return false;
+                if(strLE == "") return;
 
                 // Kiểm tra nếu strLE có DI
                 bool checkDI = Regex.IsMatch(strLE, REGEX_CHECK_DI_VAL);
@@ -596,18 +605,18 @@ namespace SaverHNX_NetCore2.BLL
                             le.MT = strVal;
                             break;
                         case LE_MP_LONG:    //"MatchPrice":
-                            if (!CBase.IsNumeric(strVal)) return false;// ko phai so thi return luon
+                            if (!CBase.IsNumeric(strVal)) return ;// ko phai so thi return luon
 
                             le.MP = Convert.ToDouble(strVal);
                             //le.MP = (int)(Convert.ToDecimal(strVal)); 
                             break;
                         case LE_TV_LONG:
-                            if (!CBase.IsNumeric(strVal)) return false;// ko phai so thi return luon
+                            if (!CBase.IsNumeric(strVal)) return ;// ko phai so thi return luon
 
                             le.TV = long.Parse(strVal.Replace(".000000", "")) / 1000000;
                             break;
                         case LE_TQ_LONG:    //"NM_TotalTradedQtty":
-                            if (!CBase.IsNumeric(strVal)) return false;// ko phai so thi return luon
+                            if (!CBase.IsNumeric(strVal)) return ;// ko phai so thi return luon
 
                             strVal = strVal.Replace(".000000", ""); // bo so sau dau phay
 
@@ -616,7 +625,7 @@ namespace SaverHNX_NetCore2.BLL
 
                             // thong tin moi van giong thong tin cu thi exit 
                             if (strOldNMQtty == strNewNMQtty)
-                                return false;
+                                return;
                             else
                                 Dic_AddOrUpdate(ref this.m_dicLE_NM_TotalTradedQtty, strSymbol, strNewNMQtty);
 
@@ -629,7 +638,7 @@ namespace SaverHNX_NetCore2.BLL
                 // ko co match thi return ""
                 // match time luon ok vay la phai >1
                 if (intMatchCount <= 1)
-                    return false;
+                    return ;
                 strJsonC = JsonConvert.SerializeObject(checkDI ? le : new
                 {
                     le.MT,
@@ -648,19 +657,26 @@ namespace SaverHNX_NetCore2.BLL
 
                 string Z_VALUE = strJsonC;
 
-                if (m_RC.RC != null)
+                try
                 {
-                    m_RC.RC.SortedSetAdd(Z_KEY_VOL, Z_VALUE, Z_SCORE);
+                    if (m_RC.RC != null)
+                    {
+                        m_RC.RC.SortedSetAdd(Z_KEY_VOL, Z_VALUE, Z_SCORE);
 
-                    m_RC.RC.SortedSetAdd(Z_KEY_VAL, Z_VALUE, Z_SCORE);
+                        m_RC.RC.SortedSetAdd(Z_KEY_VAL, Z_VALUE, Z_SCORE);
+                    }
                 }
-
-                return true;
+                catch (Exception ex)
+                {
+                    CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
+                    return;
+                }
+                return ;
             }
             catch (Exception ex)
             {
                 CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
-                return false ;
+                return ;
             }
         }
         /// <summary>

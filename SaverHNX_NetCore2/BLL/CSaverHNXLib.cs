@@ -264,7 +264,7 @@ namespace SaverHNX_NetCore2.BLL
         {
             try
             {
-                //TimerProc_GroupREDIS().GetAwaiter().GetResult();
+                
                 _ = TimerProc_GroupREDIS();
             }
             catch (Exception ex)
@@ -401,20 +401,22 @@ namespace SaverHNX_NetCore2.BLL
             try
             {
                 string strCSV = "";
+                var stopWatch = Stopwatch.StartNew();
                 //int intTotalRow = 0;
-                while(this.m_queueRedis.TryDequeue(out strCSV))
+                while (stopWatch.ElapsedMilliseconds < 500 && this.m_queueRedis.TryDequeue(out strCSV))
                 {
                     var CW = Stopwatch.StartNew();
                     string strLogonInfor = "";
                     if (!string.IsNullOrEmpty(strCSV))
                     {
-                        this._cHandCode.ProcessDataRedis(strCSV, ref strLogonInfor);
+                        strLogonInfor = await  this._cHandCode.ProcessDataRedis(strCSV);
                         _msgCount_RD++;
-                        CLog.LogEx("Dequeue_msg_REDIS.txt", $"Dequeue_REDIS: {strCSV} - Time: {CW.ElapsedMilliseconds}"); 
+                        CLog.LogEx("Dequeue_msg_REDIS.txt", $"Dequeue_REDIS: {strCSV} - Time: {CW.ElapsedMilliseconds} - Count: {_msgCount_RD}" ); 
                     }
                     if (strLogonInfor != "")
                     {
-                        //insertRedis + Pub Monitor
+                        //Pub Monitor
+                        this.m_M5G.Monitor5G_SendMessage(CMonitor5G.GetLocalDateTime(), CMonitor5G.GetLocalIP(), CMonitor5G.MONITOR_APP.HNX_Logon_Saver5G, strLogonInfor);
                         
                     }
                 }
@@ -425,6 +427,7 @@ namespace SaverHNX_NetCore2.BLL
             }
             finally
             {
+                CLog.LogEx("Dequeue_msg_REDIS.txt", $"RELEASE: ------------------------------------------- Count: {_msgCount_RD}");
                 semaphoreREDIS.Release();
             }
         }
