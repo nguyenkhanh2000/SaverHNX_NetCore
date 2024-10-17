@@ -44,7 +44,7 @@ class Program
         }
         catch(Exception ex) 
         {
-            throw ex;
+            CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
         }
     }
 }

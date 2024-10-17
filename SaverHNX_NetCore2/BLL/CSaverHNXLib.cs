@@ -6,6 +6,7 @@ using StackExchange.Redis;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
+using System.Threading;
 using System.Timers;
 using System.Xml.Serialization;
 
@@ -84,6 +85,10 @@ namespace SaverHNX_NetCore2.BLL
 
             this.StartTimers();
         }
+        /// <summary>
+        /// start timer
+        /// </summary>
+        /// <returns></returns>
         private bool StartTimers()
         {
             try
@@ -98,9 +103,9 @@ namespace SaverHNX_NetCore2.BLL
                 Console.WriteLine("Timers started");
                 //send Monitor
                 StringBuilder sbMsg = new StringBuilder("StartTimers: ");
-                //sbMsg.Append(" this.m_crbIG.SrcQueuePath=" + this.m_crbMQ.SrcQueuePath);
-                //sbMsg.Append("; this.m_tmrProcessDataRedis.Interval=" + this.m_tmrProcessDataRedis.Interval.ToString());
-                //sbMsg.Append("; this.m_tmrProcessDataDB.Interval=" + this.m_tmrProcessDataDB.Interval.ToString());
+                sbMsg.Append($"QueueName:{this._appSetting.BrokerSetting.QueueName} - ExchangeQueue:{this._appSetting.BrokerSetting.ExchangeName} - RoutingKey:{this._appSetting.BrokerSetting.RoutingKey}");
+                sbMsg.Append("; this.m_tmrGroupREDIS.Interval=" + this.m_tmrGroupREDIS.Interval.ToString());
+                sbMsg.Append("; this.m_tmrGroupDataDB.Interval=" + this.m_tmrGroupSQL.Interval.ToString());
                 this.m_M5G.Monitor5G_SendMessage(CMonitor5G.GetLocalDateTime(), CMonitor5G.GetLocalIP(), CMonitor5G.MONITOR_APP.HNX_Saver5G, sbMsg.ToString());
                 return true;
             }
@@ -110,6 +115,32 @@ namespace SaverHNX_NetCore2.BLL
                 return false;
             }
         }
+        /// <summary>
+        /// stop timer
+        /// </summary>
+        /// <returns></returns>
+        public bool StopTimers()
+        {
+            try
+            {
+                this.m_tmrGroupREDIS.Enabled = false;
+                this.m_tmrGroupSQL.Enabled = false;
+                this.m_tmrGroupORACLE.Enabled = false;
+                // 2016-01-04 16:27:16 ngocta2      send CMonitor5G
+                StringBuilder sbMsg = new StringBuilder("StopTimers");
+                this.m_M5G.Monitor5G_SendMessage(CMonitor5G.GetLocalDateTime(), CMonitor5G.GetLocalIP(), CMonitor5G.MONITOR_APP.HNX_Saver5G, sbMsg.ToString());
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
+                return false;
+            }
+        }
+        /// <summary>
+        /// init Timer
+        /// </summary>
         private void Init() 
         {
             try
@@ -250,7 +281,7 @@ namespace SaverHNX_NetCore2.BLL
             try
             {
                 // Send the message count to InfluxDB asynchronously
-                 this._cTracker.MsgRD2InfluxDBAsync(_msgCount_RD);
+                 await this._cTracker.MsgRD2InfluxDBAsync(_msgCount_RD);
             }
             catch (Exception ex)
             {
@@ -263,8 +294,7 @@ namespace SaverHNX_NetCore2.BLL
         private void TimerProc_GroupREDIS_Wrapper(object sender, ElapsedEventArgs e)
         {
             try
-            {
-                
+            {             
                 _ = TimerProc_GroupREDIS();
             }
             catch (Exception ex)
@@ -323,8 +353,6 @@ namespace SaverHNX_NetCore2.BLL
                 var SW1 = Stopwatch.StartNew(); 
                 var SW2 = Stopwatch.StartNew();
                 if(string.IsNullOrEmpty(strMessage)) return;
-                //Rep message ở đây
-
 
                 //Log nhận msg
                 CLog.LogEx("ReceviedMsg.txt", $"ProcessDataSingle:1->Received message: {strMessage}");
@@ -401,25 +429,28 @@ namespace SaverHNX_NetCore2.BLL
             try
             {
                 string strCSV = "";
-                var stopWatch = Stopwatch.StartNew();
-                //int intTotalRow = 0;
+                var stopWatch = Stopwatch.StartNew(); //Stopwatch validate Timer
+                int intTotalRow = 0;
+                var SW_RD = Stopwatch.StartNew(); //Stopwatch đo tg xử lý 1 Timer
                 while (stopWatch.ElapsedMilliseconds < 500 && this.m_queueRedis.TryDequeue(out strCSV))
                 {
                     var CW = Stopwatch.StartNew();
                     string strLogonInfor = "";
                     if (!string.IsNullOrEmpty(strCSV))
                     {
-                        strLogonInfor = await  this._cHandCode.ProcessDataRedis(strCSV);
+                        strLogonInfor = await this._cHandCode.ProcessDataRedis(strCSV);
+                        if (strLogonInfor != "")
+                        {
+                            //Pub Monitor
+                            this.m_M5G.Monitor5G_SendMessage(CMonitor5G.GetLocalDateTime(), CMonitor5G.GetLocalIP(), CMonitor5G.MONITOR_APP.HNX_Logon_Saver5G, strLogonInfor);
+                        }
+                        intTotalRow++;
                         _msgCount_RD++;
-                        CLog.LogEx("Dequeue_msg_REDIS.txt", $"Dequeue_REDIS: {strCSV} - Time: {CW.ElapsedMilliseconds} - Count: {_msgCount_RD}" ); 
-                    }
-                    if (strLogonInfor != "")
-                    {
-                        //Pub Monitor
-                        this.m_M5G.Monitor5G_SendMessage(CMonitor5G.GetLocalDateTime(), CMonitor5G.GetLocalIP(), CMonitor5G.MONITOR_APP.HNX_Logon_Saver5G, strLogonInfor);
-                        
-                    }
+                        CLog.LogEx("Dequeue_msg_REDIS.txt", $"Dequeue_REDIS: {strCSV} - Time: {CW.ElapsedMilliseconds} - Count: {_msgCount_RD}"); 
+                    }                    
                 }
+                //send monitor
+                this.m_M5G.Monitor5G_SendStatusFeeder(CMonitor5G.GetLocalDateTime(), CMonitor5G.GetLocalIP(), CMonitor5G.MONITOR_APP.HNX_Saver5G, intTotalRow, SW_RD.ElapsedMilliseconds);
             }
             catch (Exception ex) 
             {
@@ -431,91 +462,44 @@ namespace SaverHNX_NetCore2.BLL
                 semaphoreREDIS.Release();
             }
         }
-        //private async Task TimerProc_GroupSQL()
-        //{
-        //    await semaphoreSQL.WaitAsync();
-        //    try
-        //    {
-        //        StringBuilder sbAllSQL = new StringBuilder("");
-        //        int intTotalRow = 0;
-        //        int batchSize = 1000; // Limit 1000 msg
-        //        int batchCounter = 0; // Theo dõi số lượng msg đc xử lý
-
-        //        while (this.m_queueSQL.Count > 0)
-        //        {
-        //            // Dequeue the message
-        //            string strCSV = this.m_queueSQL.Dequeue();
-
-        //            // Check if message is valid
-        //            if (!string.IsNullOrEmpty(strCSV))
-        //            {
-        //                // Add message to the StringBuilder for processing
-        //                sbAllSQL.Append(Environment.NewLine + CConfig.SQL_EXEC + strCSV);
-        //                intTotalRow++;
-        //                batchCounter++;
-
-        //                // Khi đạt limit batchSize -> Xử lý 
-        //                if (batchCounter >= batchSize)
-        //                {
-        //                    // Add transaction control SQL
-        //                    sbAllSQL.Insert(0, CConfig.SQL_BEGIN_TRANSACTION + Environment.NewLine);
-        //                    sbAllSQL.Append(Environment.NewLine + CConfig.SQL_COMMIT_TRANSACTION);
-
-        //                    // Convert StringBuilder to string for SQL execution
-        //                    string strTransaction = sbAllSQL.ToString();
-        //                    this._cHandCode.ProcessDataSQL(strTransaction);
-
-        //                    // Reset StringBuilder and counters for the next batch
-        //                    sbAllSQL.Clear();
-        //                    batchCounter = 0;
-        //                }
-        //            }
-        //        }
-
-        //        // Xử lý dữ liệu còn lại nếu có
-        //        if (batchCounter > 0)
-        //        {
-        //            sbAllSQL.Insert(0, CConfig.SQL_BEGIN_TRANSACTION + Environment.NewLine);
-        //            sbAllSQL.Append(Environment.NewLine + CConfig.SQL_COMMIT_TRANSACTION);
-
-        //            string strTransaction = sbAllSQL.ToString();
-        //            this._cHandCode.ProcessDataSQL(strTransaction);
-        //        }
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
-        //    }
-        //    finally
-        //    {
-        //        semaphoreSQL.Release();
-        //    }
-        //}
-
+        /// <summary>
+        ///Tạo StringBuilder cho strTransaction:
+            /*
+                BEGIN TRANSACTION
+                EXEC prc_S5G_HNX_SAVER_IG_SI_UPDATE @BeginString='HNX.TDS.1',@BodyLength='258',@MsgType='SI',@SenderCompID='HNX',@SendingTime='20241007-09:00:02',@IDSymbol='12892',@Symbol='KST',@SecurityType='ST',@IssueDate='00010101-12:01:00',@CeilingPrice='13000',@FloorPrice='10800',@SecurityTradingStatus='0',@BasicPrice='11900',@BoardCode='LIS_BRD_01',@RemainForeignQtty='2913089',@Parvalue='10000',@PriorClosePrice='11900',@Tradingdate='20241007',@Time='09:00:00',@TradingUnit='100',@TotalListingQtty='5992020.000000',@DateNo='3441',@ReferenceStatus='0',@TradingSessionID='LIS_CON_NML',@TradSesStatus='1',@ListingStatus='0'
+                EXEC prc_S5G_HNX_SAVER_IG_SI_UPDATE @BeginString = 'HNX.TDS.1',@BodyLength = '263',@MsgType = 'SI',@SenderCompID = 'HNX',@SendingTime = '20241007-09:00:02',@IDSymbol = '5564',@Symbol = 'MKV',@SecurityType = 'ST',@IssueDate = '00010101-12:01:00',@CeilingPrice = '10200',@FloorPrice = '8400',@SecurityTradingStatus = '0',@BasicPrice = '9300',@BoardCode = 'LIS_BRD_01',@RemainForeignQtty = '2293424',@Parvalue = '10000',@PriorOpenPrice = '8900',@PriorClosePrice = '9300',@Tradingdate = '20241007',@Time = '09:00:00',@TradingUnit = '100',@TotalListingQtty = '5000038.000000',@DateNo = '3968',@ReferenceStatus = '0',@TradingSessionID = 'LIS_CON_NML',@TradSesStatus = '1',@ListingStatus = '0'
+                COMMIT TRANSACTION  
+            */
+        /// </summary>
+        /// <returns></returns>
         private async Task TimerProc_GroupSQL()
         {
             await semaphoreSQL.WaitAsync();
             try
             {
-                StringBuilder sbAllSQL = new StringBuilder("");
+                StringBuilder sbAllSQL = new StringBuilder(CConfig.SQL_BEGIN_TRANSACTION + Environment.NewLine);
                 int intTotalRow = 0;
                 string strCSV = "";
+                bool hasData = false; //Flag theo dõi có dữ liệu hay ko?
+                var SW_DB = Stopwatch.StartNew();
                 while (this.m_queueSQL.TryDequeue(out strCSV))
                 {
                     if (!string.IsNullOrEmpty(strCSV))
                     {
+                        intTotalRow++;
                         CLog.LogEx("Dequeue_msg_SQL.txt", strCSV);
-                        sbAllSQL.Append(Environment.NewLine + CConfig.SQL_EXEC + strCSV);
-
+                        sbAllSQL.Append(CConfig.SQL_EXEC).Append(strCSV).Append(Environment.NewLine);
+                        hasData = true;
                     }
                 }
-                if(sbAllSQL.Length > 0)
+                if(hasData)
                 {
-                    sbAllSQL.Insert(0, CConfig.SQL_BEGIN_TRANSACTION + Environment.NewLine);
-                    sbAllSQL.Append(Environment.NewLine + CConfig.SQL_COMMIT_TRANSACTION);
+                    sbAllSQL.Append(CConfig.SQL_COMMIT_TRANSACTION); //Đóng transaction bằng COMMIT
                     string strTransaction = sbAllSQL.ToString();
                     this._cHandCode.ProcessDataSQL(strTransaction);
-                }  
+                }
+                //send Monitor
+                this.m_M5G.Monitor5G_SendStatusFeeder(CMonitor5G.GetLocalDateTime(), CMonitor5G.GetLocalIP(), CMonitor5G.MONITOR_APP.HNX_Saver5G_DB, intTotalRow, SW_DB.ElapsedMilliseconds);
             }
             catch (Exception ex)
             {
@@ -531,9 +515,9 @@ namespace SaverHNX_NetCore2.BLL
             await semaphoreORACLE.WaitAsync();
             try
             {
-                List<string> resultList = new List<string>();
                 int intTotalRow = 0;
                 string strCSV = "";
+                var CW_ORCL = Stopwatch.StartNew();
                 while(this.m_queueOracle.TryDequeue(out strCSV))
                 {
                     if (!string.IsNullOrEmpty(strCSV))
@@ -542,7 +526,9 @@ namespace SaverHNX_NetCore2.BLL
                         _cOracle.InsertDataHNXDI(strCSV);
                     }
                     intTotalRow++;
-                }                 
+                }         
+                //send Monitor
+                this.m_M5G.Monitor5G_SendStatusFeeder(CMonitor5G.GetLocalDateTime(), CMonitor5G.GetLocalIP(), CMonitor5G.MONITOR_APP.HNX_Saver5G_DB, intTotalRow, CW_ORCL.ElapsedMilliseconds);
             }
             catch (Exception ex)
             {

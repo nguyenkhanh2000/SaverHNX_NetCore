@@ -91,6 +91,36 @@ namespace SaverHNX_NetCore2.BLL
         private const string TYPE_SI = "SI";
         private const string TYPE_TP = "TP";
 
+        // Mapping dictionary for key-value assignments
+        private static readonly Dictionary<string, Action<IG_BI_FULL, string>> propertyMap_BI = new Dictionary<string, Action<IG_BI_FULL, string>>
+        {
+            { "BeginString", (obj, value) => obj.BeginString = value },
+            { "BodyLength", (obj, value) => obj.BodyLength = value },
+            { "MsgType", (obj, value) => obj.MsgType = value },
+            { "SenderCompID", (obj, value) => obj.SenderCompID = value },
+            { "SendingTime", (obj, value) => obj.SendingTime = value },
+            { "Name", (obj, value) => obj.Name = value },
+            { "Shortname", (obj, value) => obj.Shortname = value },
+            { "numSymbolAdvances", (obj, value) => obj.numSymbolAdvances = value },
+            { "numSymbolDeclines", (obj, value) => obj.numSymbolDeclines = value },
+            { "8numSymbolNochange", (obj, value) => obj.numSymbolNochange = value },
+            { "totalNormalTradedQttyOd", (obj, value) => obj.totalNormalTradedQttyOd = value },
+            { "totalNormalTradedValueOd", (obj, value) => obj.totalNormalTradedValueOd = value },
+            { "totalNormalTradedQttyRd", (obj, value) => obj.totalNormalTradedQttyRd = value },
+            { "totalNormalTradedValueRd", (obj, value) => obj.totalNormalTradedValueRd = value },
+            { "totalPTTradedQtty", (obj, value) => obj.totalPTTradedQtty = value },
+            { "totalPTTradedValue", (obj, value) => obj.totalPTTradedValue = value },
+            { "TotalTrade", (obj, value) => obj.TotalTrade = value },
+            { "TotalStock", (obj, value) => obj.TotalStock = value },
+            { "DateNo", (obj, value) => obj.DateNo = value },
+            { "BoardCode", (obj, value) => obj.BoardCode = value },
+            { "BoardStatus", (obj, value) => obj.BoardStatus = value },
+            { "Tradingdate", (obj, value) => obj.Tradingdate = value },
+            { "Time", (obj, value) => obj.Time = value },
+            { "TradingSessionID", (obj, value) => obj.TradingSessionID = value },
+            { "TradSesStatus", (obj, value) => obj.TradSesStatus = value },
+            { "f341", (obj, value) => obj.f341 = value }
+        };
         //const SQL
         // ten SP se tao theo quy tac
         //prc_S5G_HNX_SAVER_IG_SI_UPDATE
@@ -144,20 +174,13 @@ namespace SaverHNX_NetCore2.BLL
                         Redis_msg_A(strCSV, ref strLogonInfor);                        
                         break;
                     case "SI":
-                        //Task task1 = Task.Run(() => InsertRealtime2Redis(strCSV));
-                        //Task task2 = Task.Run(() => InsertLE2Redis(strCSV));
-                        //Task task3 = Task.Run(() => InsertLS2Redis(strCSV));    
-                        //Task.WaitAll(task1, task2, task3);
                         await Task.WhenAll(InsertRealtime2Redis(strCSV), InsertLE2Redis(strCSV), InsertLS2Redis(strCSV));
                         break;
                     case "TP":
                         //Hàm xử lý REDIS key REALTIME:S5G_A32
-                        InsertRealtime2Redis(strCSV);
+                        await InsertRealtime2Redis(strCSV);
                         break;
                     case "DI":
-                        //Task taskDI = Task.Run(() => InsertLE2Redis(strCSV));
-                        //Task taskDI2 = Task.Run(() => InsertLS2Redis(strCSV));
-                        //Task.WaitAll(taskDI, taskDI2);  
                         await Task.WhenAll(InsertLE2Redis(strCSV), InsertLS2Redis(strCSV));
                         break ;
                     case "BI":
@@ -250,7 +273,7 @@ namespace SaverHNX_NetCore2.BLL
         /// </summary>
         /// <param name="strSI_TP"></param>
         /// <returns></returns>
-        private async Task InsertRealtime2Redis(string strSI_TP)
+        private async Task InsertRealtime2Redis(string strSI_TP) 
         {
             try
             {
@@ -342,92 +365,11 @@ namespace SaverHNX_NetCore2.BLL
                     var value = match.Groups[2].Value;
                     if (!string.IsNullOrEmpty(value) && !string.IsNullOrEmpty(key))
                     {
-                        switch (key)
+                        if(propertyMap_BI.TryGetValue(key, out var assignValue))
                         {
-                            case "BeginString":
-                                ig_bi_full.BeginString = value;
-                                break;
-                            case "BodyLength":
-                                ig_bi_full.BodyLength = value;
-                                break;
-                            case "MsgType":
-                                ig_bi_full.MsgType = value;
-                                break;
-                            case "SenderCompID":
-                                ig_bi_full.SenderCompID = value;
-                                break;
-                            case "SendingTime":
-                                ig_bi_full.SendingTime = value;
-                                break;
-                            case "Name":
-                                ig_bi_full.Name = value;
-                                break;
-                            case "Shortname":
-                                ig_bi_full.Shortname = value;
-                                break;
-                            case "numSymbolAdvances":
-                                ig_bi_full.numSymbolAdvances = value;
-                                break;
-                            case "numSymbolDeclines":
-                                ig_bi_full.numSymbolDeclines = value;
-                                break;
-                            case "8numSymbolNochange":
-                                ig_bi_full.numSymbolNochange = value;
-                                break;
-                            case "totalNormalTradedQttyOd":
-                                ig_bi_full.totalNormalTradedQttyOd = value;
-                                break;
-                            case "totalNormalTradedValueOd":
-                                ig_bi_full.totalNormalTradedValueOd = value;
-                                break;
-                            case "totalNormalTradedQttyRd":
-                                ig_bi_full.totalNormalTradedQttyRd = value;
-                                break;
-                            case "totalNormalTradedValueRd":
-                                ig_bi_full.totalNormalTradedValueRd = value;
-                                break;
-                            case "totalPTTradedQtty":
-                                ig_bi_full.totalPTTradedQtty = value;
-                                break;
-                            case "totalPTTradedValue":
-                                ig_bi_full.totalPTTradedValue = value;
-                                break;
-                            case "TotalTrade":
-                                ig_bi_full.TotalTrade = value;
-                                break;
-                            case "TotalStock":
-                                ig_bi_full.TotalStock = value;
-                                break;
-                            case "DateNo":
-                                ig_bi_full.DateNo = value;
-                                break;
-                            case "BoardCode":
-                                ig_bi_full.BoardCode = value;
-                                break;
-                            case "BoardStatus":
-                                ig_bi_full.BoardStatus = value;
-                                break;
-                            case "Tradingdate":
-                                ig_bi_full.Tradingdate = value;
-                                break;
-                            case "Time":
-                                ig_bi_full.Time = value;
-                                break;
-                            case "TradingSessionID":
-                                ig_bi_full.TradingSessionID = value;
-                                break;
-                            case "TradSesStatus":
-                                ig_bi_full.TradSesStatus = value;
-                                break;
-                            case "f341":
-                                ig_bi_full.f341 = value;
-                                break;
-                            default:
-                                // Các trường khác chưa xử lý
-                                break;
+                            assignValue(ig_bi_full, value); 
                         }
                     }
-
                 }
 
                 Dic_AddOrUpdate(ref m_dicBI2, strBoardCode, ig_bi_full);
@@ -585,7 +527,7 @@ namespace SaverHNX_NetCore2.BLL
                 bool checkDI = Regex.IsMatch(strLE, REGEX_CHECK_DI_VAL);
 
                 int intMatchCount = 0;
-                string strSymbol = "", strJsonC = "";
+                string strSymbol = "", strJsonC = "", strJson_Base = "";
                 // lay symbol tu strResult (SI/DI)
                 strSymbol = Regex.Match(strLE, REGEX_RD_GET_SYMBOL).Groups[1].Value;
                 LE_Model le = new LE_Model();
@@ -639,21 +581,28 @@ namespace SaverHNX_NetCore2.BLL
                 // match time luon ok vay la phai >1
                 if (intMatchCount <= 1)
                     return ;
-                strJsonC = JsonConvert.SerializeObject(checkDI ? le : new
+
+                /* <MatchPrice của CK trả về kiểu int>
+                 * MatchPrice của Phái Sinh 
+                  ---TKTT chỉ lấy Data của VOL(khối lượng) => trả về double
+                  ---key VAL => giữ nguyên về kiểu int
+                */
+                strJson_Base = JsonConvert.SerializeObject(new
                 {
                     le.MT,
                     MP = (int)le.MP,
                     le.TQ,
                     le.TV
                 });
+                //strJsonC cho TKTT_VOL => MatchPrice <double>
+                strJsonC = checkDI ? JsonConvert.SerializeObject(le) : strJson_Base;
+                
                 //Insert key LE vào Redis
                 string Z_KEY_VAL = _appsetting.RedisSetting.TEMPLATE_REDIS_KEY_LE_VAL.Replace("(Symbol)", strSymbol);
                 string Z_KEY_VOL = _appsetting.RedisSetting.TEMPLATE_REDIS_KEY_LE_VOL.Replace("(Symbol)", strSymbol);
 
-                // Lấy thời gian hiện tại (local time)
-                DateTime localDateTime = DateTime.Now;
                 // Chuyển đổi local time sang Unix timestamp
-                double Z_SCORE = ((DateTimeOffset)localDateTime).ToUnixTimeSeconds();
+                double Z_SCORE = ((DateTimeOffset)DateTime.Now).ToUnixTimeSeconds();
 
                 string Z_VALUE = strJsonC;
 
@@ -661,9 +610,11 @@ namespace SaverHNX_NetCore2.BLL
                 {
                     if (m_RC.RC != null)
                     {
+                        //TKTT_VOL
                         m_RC.RC.SortedSetAdd(Z_KEY_VOL, Z_VALUE, Z_SCORE);
 
-                        m_RC.RC.SortedSetAdd(Z_KEY_VAL, Z_VALUE, Z_SCORE);
+                        //TKTT_VAL
+                        m_RC.RC.SortedSetAdd(Z_KEY_VAL, strJson_Base, Z_SCORE);
                     }
                 }
                 catch (Exception ex)
@@ -749,6 +700,7 @@ namespace SaverHNX_NetCore2.BLL
                 if (strSymbol == DEBUG_CODE) CLog.LogEx("PO.txt", "intMatchCount=" + intMatchCount.ToString());
 
                 strJsonC = sbJsonC.ToString();
+
                 // tao key/value
                 string strKey = TEMPLATE_REDIS_KEY_PO.Replace("(Symbol)", strSymbol);
                 //insert Redis

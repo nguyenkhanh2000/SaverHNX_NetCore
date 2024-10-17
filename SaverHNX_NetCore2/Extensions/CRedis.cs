@@ -134,7 +134,8 @@ namespace SaverHNX_NetCore2.Extensions
             {
                 sb = sb.Replace("(Now)", DateTime.Now.ToString(FORMAT_DATETIME_6));  //FORMAT_TIME
                 sb = sb.Replace("(RedisData)", strRedisValue);
-                return sb.ToString();
+                string result = JsonConvert.SerializeObject(sb.ToString());
+                return result;
             }
             catch (Exception ex)
             {

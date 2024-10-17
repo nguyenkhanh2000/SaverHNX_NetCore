@@ -30,59 +30,6 @@ namespace SaverHNX_NetCore2.DAL
         /// </summary>
         /// <param name="oraclequery"></param>
         /// <returns></returns>
-        //public bool InsertDataHNXDI(string oraclequery)
-        //{
-        //    try
-        //    {
-        //        int[] arrayNvarChar = new int[] { 0, 2, 3, 4, 5, 6, 7, 8, 11, 12, 32, 33 };
-
-        //        if (oraclequery == "")
-        //            return true;
-        //        var listData = oraclequery.Split('|');
-        //        OracleParameter[] arrParams = new OracleParameter[listData.Length - 5];
-        //        // input params
-        //        foreach (var queryitem in listData)
-        //        {
-        //            var values = queryitem.Split('=');
-        //            // check bo may thang hearder
-        //            if (values[0].IndexOf("-1", StringComparison.Ordinal) > -1)
-        //                continue;
-        //            //2018-07-23 10:19:01 hungpv
-        //            var rowParam = int.Parse(values[0]);
-        //            //Check pram la so hoac char thi offer TypeDb
-        //            if (arrayNvarChar.Contains(rowParam))
-        //            {
-        //                arrParams[rowParam] = new OracleParameter(values[1], OracleDbType.Varchar2);
-        //                arrParams[rowParam].Direction = ParameterDirection.Input;
-        //                arrParams[rowParam].Value = values[2] == "" ? (object)DBNull.Value : values[2];
-        //            }
-        //            else
-        //            {
-        //                arrParams[rowParam] = new OracleParameter(values[1], OracleDbType.Decimal);
-        //                arrParams[rowParam].Direction = ParameterDirection.Input;
-        //                arrParams[rowParam].Value = values[2] == "" ? (object)DBNull.Value : decimal.Parse(values[2]);
-        //            }
-        //        }
-
-        //        // log sql
-        //        CLog.LogSQL(CBase.GetDeepCaller(), _saverSetting.SPSPIRE_S5G_HNXSAVER_IG_DI_U + GetParamORC(arrParams));
-
-        //        // exec                
-        //        OracleHelper.ExecuteNonQuery(this.CONNECTION_STRING_ORACLE_PRICE, CommandType.StoredProcedure, _saverSetting.SPSPIRE_S5G_HNXSAVER_IG_DI_U, arrParams);
-
-        //        // log output
-        //        CLog.LogSQL(CBase.GetDeepCaller(), CHAR_CRLF);
-
-        //        // return
-        //        return true;
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        // log error
-        //        CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
-        //        return false;
-        //    }
-        //}
         public bool InsertDataHNXDI(string oraclequery)
         {
             try
