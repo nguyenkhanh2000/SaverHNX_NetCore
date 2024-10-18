@@ -256,9 +256,13 @@ namespace SaverHNX_NetCore2.BLL
                 }
                 double Z_SCORE = Convert.ToDouble(DateTime.Now.ToString(CConfig.FORMAT_TIME_5));
                 // insert ZSet vao redis
-                if (this.m_RC.RC != null) 
+                if (this.m_RC.RC != null)
                 {
                     this.m_RC.RC.SortedSetAdd(_appsetting.RedisSetting.KEY_S5G_IG_LOGON, strLogonInfor, Z_SCORE);
+                }
+                if (this.m_RC.RC_Fox != null)
+                {
+                    this.m_RC.RC_Fox.SortedSetAdd(_appsetting.RedisSetting.KEY_S5G_IG_LOGON, strLogonInfor, Z_SCORE);
                 }
                 return true;
             }
@@ -330,10 +334,7 @@ namespace SaverHNX_NetCore2.BLL
                 double Z_SCORE = Convert.ToDouble(DateTime.Now.ToString(CConfig.FORMAT_TIME_5));
                 string Z_VALUE = strJsonC;
 
-                if (m_RC.RC != null)
-                {
-                    m_RC.RC.SortedSetAdd(Z_KEY, Z_VALUE, Z_SCORE);
-                }
+                await this.m_RC.SortedSetAddAsync(Z_KEY, Z_VALUE, Z_SCORE);
             }
             catch (Exception ex)
             {
@@ -495,16 +496,8 @@ namespace SaverHNX_NetCore2.BLL
                 string Z_KEY = _appsetting.RedisSetting.TEMPLATE_REDIS_KEY_KL_LS.Replace("(Symbol)", strSymbol);
                 double Z_SCORE = unixTimestamp;
                 string Z_VALUE = strJsonC;
-                try
-                {
-                    if (m_RC.RC != null)
-                        m_RC.RC.SortedSetAdd(Z_KEY, Z_VALUE, Z_SCORE);
-                }
-                catch (Exception ex)
-                {
-                    CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
-                    return;
-                }
+
+                await this.m_RC.SortedSetAddAsync(Z_KEY, Z_VALUE, Z_SCORE);
             }
             catch (Exception ex)
             {
@@ -606,28 +599,23 @@ namespace SaverHNX_NetCore2.BLL
 
                 string Z_VALUE = strJsonC;
 
-                try
-                {
-                    if (m_RC.RC != null)
-                    {
-                        //TKTT_VOL
-                        m_RC.RC.SortedSetAdd(Z_KEY_VOL, Z_VALUE, Z_SCORE);
+                var taskVol = this.m_RC.SortedSetAddAsync(Z_KEY_VOL, Z_VALUE, Z_SCORE);
+                var taskVal = this.m_RC.SortedSetAddAsync(Z_KEY_VAL, strJson_Base, Z_SCORE);
 
-                        //TKTT_VAL
-                        m_RC.RC.SortedSetAdd(Z_KEY_VAL, strJson_Base, Z_SCORE);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
-                    return;
-                }
-                return ;
+                // Đợi cả hai tác vụ hoàn thành
+                await Task.WhenAll(taskVol, taskVal);
+
+                ////TKTT_VOL
+                //await this.m_RC.SortedSetAddAsync(Z_KEY_VOL, Z_VALUE, Z_SCORE);
+                ////TKTT_VAL
+                //await this.m_RC.SortedSetAddAsync(Z_KEY_VAL, strJson_Base, Z_SCORE);
+
+                return;
             }
             catch (Exception ex)
             {
                 CLog.LogError(CBase.GetDeepCaller(), CBase.GetDetailError(ex));
-                return ;
+                return;
             }
         }
         /// <summary>

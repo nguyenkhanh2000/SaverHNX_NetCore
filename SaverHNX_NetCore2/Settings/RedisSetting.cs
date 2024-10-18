@@ -5,6 +5,7 @@ namespace SaverHNX_NetCore2.Settings
     public class RedisSetting
     {
         public string Endpoints { get; set; } = string.Empty;
+        public string Endpoints_FOX {  get; set; } = string.Empty;
         public int Redis_DB { get; set; }
         public string TEMPLATE_REDIS_KEY_LE_VOL { get; set; } = string.Empty;
         public string TEMPLATE_REDIS_KEY_LE_VAL { get; set; } = string.Empty;
